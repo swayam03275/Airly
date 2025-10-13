@@ -1,1 +1,1 @@
-export const DB_NAME = "Vibely"
+export const DB_NAME = "airly"

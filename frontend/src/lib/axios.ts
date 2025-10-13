@@ -1,11 +1,6 @@
 import axios from 'axios';
 
-let Prod = true;
-
-const ProdBaseURL = 'https://vibely-3q1i.onrender.com/api/v1';
-const LocalBaseURL = 'https://vibely-3q1i.onrender.com/api/v1';
-
-const baseURL = Prod ? ProdBaseURL : LocalBaseURL;
+const baseURL = import.meta.env.VITE_SERVER_API; // Comes from your .env
 
 const axiosInstance = axios.create({
   baseURL,
@@ -15,6 +10,7 @@ const axiosInstance = axios.create({
   },
 });
 
+// Request interceptor to attach auth token
 axiosInstance.interceptors.request.use(
   (config) => {
     try {
@@ -30,17 +26,15 @@ axiosInstance.interceptors.request.use(
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
+// Response interceptor for errors
 axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response) {
       console.error('API Error:', error.response.data);
-      
       if (error.response.status === 401) {
         localStorage.removeItem('auth');
         window.location.href = '/login';
@@ -50,9 +44,8 @@ axiosInstance.interceptors.response.use(
     } else {
       console.error('Request setup error:', error.message);
     }
-    
     return Promise.reject(error);
   }
 );
 
-export default axiosInstance; 
+export default axiosInstance;

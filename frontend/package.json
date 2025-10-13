@@ -1,8 +1,15 @@
 {
-  "name": "vite-react-typescript-starter",
+  "name": "airly-frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "author": "Swayam",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/swayam03275/Airly.git"
+  },
+  "homepage": "https://github.com/swayam03275/Airly",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

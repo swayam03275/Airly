@@ -1,5 +1,5 @@
 {
-  "name": "vibely",
+  "name": "airly",
   "version": "1.0.0",
   "description": "",
   "type": "module",
@@ -10,14 +10,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NewSmoke38/Vibely.git"
+    "url": "https://github.com/swayam03275/Airly.git"
   },
-  "author": "Shivani",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/NewSmoke38/Vibely/issues"
-  },
-  "homepage": "https://github.com/NewSmoke38/Vibely#readme",
+  "author": "Swayam",
+  "license": "MIT",
+  "homepage": "https://github.com/swayam03275/Airly",
   "devDependencies": {
     "eslint-plugin-jsdoc": "^51.2.3",
     "nodemon": "^3.1.10"
