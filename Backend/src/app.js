@@ -44,15 +44,19 @@ import userRouter from "./routes/user.routes.js";
 import viewsRouter from "./routes/views.routes.js";
 
 // routes declaration
-app.use("/api/v1/users", userRouter);
-app.use("/api/v1/profile", profileRouter);
-app.use("/api/v1/tweets", tweetRouter);
-app.use("/api/v1/admin", adminRouter);
-app.use("/api/v1/feed", feedRouter);
-app.use("/api/v1", commentRouter);
-app.use("/api/v1/views", viewsRouter);
-app.use("/api/v1/likes", likeRouter);
-app.use("/api/v1/bookmarks", bookmarkRouter);
+const apiRouter = express.Router();
+
+apiRouter.use("/users", userRouter);
+apiRouter.use("/profile", profileRouter);
+apiRouter.use("/tweets", tweetRouter);
+apiRouter.use("/admin", adminRouter);
+apiRouter.use("/feed", feedRouter);
+apiRouter.use("/", commentRouter);
+apiRouter.use("/views", viewsRouter);
+apiRouter.use("/likes", likeRouter);
+apiRouter.use("/bookmarks", bookmarkRouter);
+
+app.use("/api/v1", apiRouter);
 
 // http://localhost:8000/api/v1/users/register
 
