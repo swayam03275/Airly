@@ -19,8 +19,6 @@ connectDB()
 
 export default app;
 
-startServer();
-
 app.get("/", (req, res) => {
   res.send("Yo, backend is live! Welcome to the API.");
 });
