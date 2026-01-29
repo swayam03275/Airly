@@ -1,12 +1,10 @@
 import multer from "multer";
+import os from "os";
 
 // for pfp media in user profile
 const pfpStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    // Use the /tmp directory for serverless environments
-    const tempDir =
-      process.env.NODE_ENV === "production" ? "/tmp" : "./public/temp";
-    cb(null, tempDir);
+    cb(null, os.tmpdir());
   },
   filename: function (req, file, cb) {
     cb(null, file.originalname);
@@ -20,7 +18,7 @@ export const uploadPfp = multer({
 
 // for pics in tweets
 const mediaStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "./public/temp"),
+  destination: (req, file, cb) => cb(null, os.tmpdir()),
   filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
 });
 
