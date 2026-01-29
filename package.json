@@ -6,7 +6,7 @@
   "scripts": {
     "install-backend": "cd Backend && npm install",
     "install-frontend": "cd frontend && npm install",
-    "install-all": "npm run install-backend && npm run install-frontend",
+    "postinstall": "npm run install-backend && npm run install-frontend",
     "build": "cd frontend && npm run build"
   },
   "keywords": [],
