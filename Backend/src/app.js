@@ -6,9 +6,12 @@ const app = express();
 
 app.use(
   cors({
-    origin: ["http://localhost:3000", "http://localhost:5173"],
+    origin:
+      process.env.NODE_ENV === "production"
+        ? "https://airly-frontend.vercel.app" // Replace with your frontend's Vercel URL
+        : ["http://localhost:3000", "http://localhost:5173"],
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json({ limit: "16kb" }));
