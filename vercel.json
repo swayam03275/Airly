@@ -15,16 +15,12 @@
   ],
   "rewrites": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/v1/(.*)",
       "destination": "/Backend/src/index.js"
     },
     {
       "source": "/((?!api/).*)",
       "destination": "/frontend/dist/index.html"
-    },
-    {
-      "source": "/api/v1/(.*)",
-      "destination": "https://your-backend-url.vercel.app/api/v1/$1"
     }
   ]
 }
