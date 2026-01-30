@@ -17,8 +17,5 @@ connectDB()
     console.log("MONGO db connection failed !!! ", err);
   });
 
+// Must be at the end for Vercel serverless
 export default app;
-
-app.get("/", (req, res) => {
-  res.send("Yo, backend is live! Welcome to the API.");
-});
