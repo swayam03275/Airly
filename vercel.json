@@ -6,7 +6,7 @@
       "use": "@vercel/node"
     },
     {
-      "src": "package.json",
+      "src": "frontend/package.json",
       "use": "@vercel/static-build",
       "config": {
         "distDir": "frontend/dist"
@@ -19,8 +19,8 @@
       "destination": "/Backend/src/index.js"
     },
     {
-      "source": "/((?!api/).*)",
-      "destination": "/frontend/dist/index.html"
+      "source": "/(.*)",
+      "destination": "frontend/dist/index.html"
     }
   ]
 }
