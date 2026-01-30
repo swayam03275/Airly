@@ -21,6 +21,10 @@
     {
       "source": "/((?!api/).*)",
       "destination": "/frontend/dist/index.html"
+    },
+    {
+      "source": "/api/v1/(.*)",
+      "destination": "https://your-backend-url.vercel.app/api/v1/$1"
     }
   ]
 }
