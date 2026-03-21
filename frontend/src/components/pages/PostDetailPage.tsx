@@ -1,57 +1,243 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Heart, MessageCircle, Eye } from 'lucide-react';
-import { Post } from '../../types';
-import { feedService } from '../../services/feedService';
-import { tweetService } from '../../services/tweetService';
+import { Eye, Heart, MessageCircle } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  isPostLikedLocally,
+  setPostLikedLocally,
+  subscribeToLikeState,
+} from "../../lib/likeState";
+import { feedService } from "../../services/feedService";
+import { tweetService } from "../../services/tweetService";
+import { Post } from "../../types";
+
+interface CommentItem {
+  _id: string;
+  content: string;
+  user: {
+    _id: string;
+    username: string;
+    fullName: string;
+    pfp: string;
+  };
+  createdAt: string;
+}
 
 interface PostDetailPageProps {
   post: Post;
   onEditPost: (post: Post) => void;
 }
 
-export const PostDetailPage: React.FC<PostDetailPageProps> = ({ post, onEditPost }) => {
+export const PostDetailPage: React.FC<PostDetailPageProps> = ({
+  post,
+  onEditPost,
+}) => {
   const navigate = useNavigate();
   const [relatedPosts, setRelatedPosts] = useState<Post[]>([]);
   const [isLoadingRelated, setIsLoadingRelated] = useState(false);
+  const postWithMetrics = post as Post & {
+    likesCount?: number;
+    likeCount?: number;
+    commentsCount?: number;
+    commentCount?: number;
+  };
+
+  const getLikeCountFromPost = () =>
+    Number(
+      postWithMetrics.likes ??
+        postWithMetrics.likesCount ??
+        postWithMetrics.likeCount ??
+        0,
+    );
+
+  const getCommentCountFromPost = () =>
+    Number(
+      postWithMetrics.comments ??
+        postWithMetrics.commentsCount ??
+        postWithMetrics.commentCount ??
+        0,
+    );
+
+  const [isLiked, setIsLiked] = useState(post.isLiked || false);
+  const [likeCount, setLikeCount] = useState(getLikeCountFromPost());
+  const [isTogglingLike, setIsTogglingLike] = useState(false);
+  const [comments, setComments] = useState<CommentItem[]>([]);
+  const [commentCount, setCommentCount] = useState(getCommentCountFromPost());
+  const [newComment, setNewComment] = useState("");
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [isLoadingMoreComments, setIsLoadingMoreComments] = useState(false);
+  const [commentsCursor, setCommentsCursor] = useState<string | undefined>(
+    undefined,
+  );
+  const [hasMoreComments, setHasMoreComments] = useState(false);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  const commentsContainerRef = useRef<HTMLDivElement | null>(null);
+  const commentsSentinelRef = useRef<HTMLDivElement | null>(null);
+  const COMMENTS_BATCH = 3;
+
+  const postId = post._id || post.id;
+
+  useEffect(() => {
+    const localLiked = isPostLikedLocally(postId);
+    setIsLiked(localLiked || post.isLiked || false);
+    setLikeCount(getLikeCountFromPost());
+    setCommentCount(getCommentCountFromPost());
+  }, [
+    post._id,
+    post.id,
+    post.isLiked,
+    post.likes,
+    postWithMetrics.likesCount,
+    postWithMetrics.likeCount,
+    post.comments,
+    postWithMetrics.commentsCount,
+    postWithMetrics.commentCount,
+  ]);
+
+  useEffect(() => {
+    if (!postId) return;
+
+    return subscribeToLikeState(() => {
+      setIsLiked(isPostLikedLocally(postId));
+    });
+  }, [postId]);
+
+  useEffect(() => {
+    const syncPostReactions = async () => {
+      if (!postId) return;
+
+      try {
+        const [likedResponse, likeCountResponse] = await Promise.all([
+          tweetService.checkUserLiked(postId),
+          tweetService.getLikeCount(postId),
+        ]);
+
+        setIsLiked(Boolean(likedResponse.data?.liked));
+        setLikeCount(Number(likeCountResponse.data?.likeCount ?? 0));
+        setPostLikedLocally(postId, Boolean(likedResponse.data?.liked));
+      } catch (error) {
+        console.error("Failed to sync post reactions:", error);
+      }
+    };
+
+    syncPostReactions();
+  }, [postId]);
+
+  useEffect(() => {
+    fetchComments(true);
+  }, [postId]);
+
+  const fetchComments = async (reset = false) => {
+    if (!postId) return;
+
+    try {
+      if (reset) {
+        setIsLoadingComments(true);
+      } else {
+        setIsLoadingMoreComments(true);
+      }
+
+      const cursorToUse = reset ? undefined : commentsCursor;
+
+      const [commentsResponse, countResponse] = await Promise.all([
+        tweetService.getComments(postId, cursorToUse, COMMENTS_BATCH),
+        tweetService.getCommentCount(postId),
+      ]);
+
+      const fetchedComments = commentsResponse.data.comments || [];
+
+      if (reset) {
+        setComments(fetchedComments);
+      } else {
+        setComments((prev) => [...prev, ...fetchedComments]);
+      }
+
+      setHasMoreComments(Boolean(commentsResponse.data.hasMore));
+      setCommentsCursor(commentsResponse.data.nextCursor);
+      setCommentCount(countResponse.data.count || 0);
+    } catch (error) {
+      console.error("Failed to fetch comments:", error);
+      if (reset) {
+        setComments([]);
+      }
+    } finally {
+      setIsLoadingComments(false);
+      setIsLoadingMoreComments(false);
+    }
+  };
+
+  const handleLoadMoreComments = () => {
+    if (!hasMoreComments || isLoadingMoreComments) return;
+    fetchComments(false);
+  };
+
+  useEffect(() => {
+    const root = commentsContainerRef.current;
+    const target = commentsSentinelRef.current;
+
+    if (!root || !target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry.isIntersecting) {
+          handleLoadMoreComments();
+        }
+      },
+      {
+        root,
+        threshold: 0.1,
+      },
+    );
+
+    observer.observe(target);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [comments.length, hasMoreComments, isLoadingMoreComments]);
 
   useEffect(() => {
     const fetchRelatedPosts = async () => {
       try {
         setIsLoadingRelated(true);
         const response = await feedService.getFeedPosts();
-        
-                         const allPosts = response.posts || [];
+
+        const allPosts = response.posts || [];
         const filtered = allPosts
-          .filter(p => (p._id || p.id) !== (post._id || post.id))
-          .filter(p => {
+          .filter((p) => (p._id || p.id) !== (post._id || post.id))
+          .filter((p) => {
             const isSameUser = p.user?.username === post.user?.username;
-            const hasSimilarTags = post.tags && p.tags && 
-              post.tags.some(tag => p.tags!.includes(tag));
+            const hasSimilarTags =
+              post.tags &&
+              p.tags &&
+              post.tags.some((tag) => p.tags!.includes(tag));
             return isSameUser || hasSimilarTags;
           })
           .slice(0, 4);
-        
+
         if (filtered.length < 4) {
           const remainingCount = 4 - filtered.length;
           const randomPosts = allPosts
-            .filter(p => (p._id || p.id) !== (post._id || post.id))
-            .filter(p => !filtered.some(fp => (fp._id || fp.id) === (p._id || p.id)))
+            .filter((p) => (p._id || p.id) !== (post._id || post.id))
+            .filter(
+              (p) =>
+                !filtered.some((fp) => (fp._id || fp.id) === (p._id || p.id)),
+            )
             .slice(0, remainingCount);
           filtered.push(...randomPosts);
         }
-        
+
         setRelatedPosts(filtered);
       } catch (error) {
-        console.error('Failed to fetch related posts:', error);
+        console.error("Failed to fetch related posts:", error);
         setRelatedPosts([]);
       } finally {
         setIsLoadingRelated(false);
       }
     };
 
-         fetchRelatedPosts();
-   }, [post._id, post.id, post.user?.username, post.tags]);
+    fetchRelatedPosts();
+  }, [post._id, post.id, post.user?.username, post.tags]);
 
   const handleRelatedPostClick = (relatedPost: Post) => {
     const postId = relatedPost._id || relatedPost.id;
@@ -65,22 +251,77 @@ export const PostDetailPage: React.FC<PostDetailPageProps> = ({ post, onEditPost
     }
   };
 
-  const handleRelatedPostLike = async (e: React.MouseEvent, relatedPost: Post) => {
+  const handleLike = async () => {
+    if (!postId || isTogglingLike) return;
+
+    const nextLiked = !isLiked;
+    const nextLikeCount = Math.max(0, likeCount + (nextLiked ? 1 : -1));
+
+    setIsLiked(nextLiked);
+    setLikeCount(nextLikeCount);
+    setIsTogglingLike(true);
+
+    try {
+      const response = await tweetService.toggleLike(postId);
+      setIsLiked(response.data.liked);
+      setLikeCount(response.data.likeCount);
+      setPostLikedLocally(postId, response.data.liked);
+    } catch (error) {
+      console.error("Failed to toggle like:", error);
+      setIsLiked(!nextLiked);
+      setLikeCount(likeCount);
+    } finally {
+      setIsTogglingLike(false);
+    }
+  };
+
+  const handleCommentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const content = newComment.trim();
+
+    if (!postId || !content || isSubmittingComment) return;
+
+    try {
+      setIsSubmittingComment(true);
+      const response = await tweetService.createComment(postId, content);
+      setNewComment("");
+
+      if (response.data) {
+        setComments((prev) => [response.data as CommentItem, ...prev]);
+      }
+      setCommentCount((prev) => prev + 1);
+    } catch (error) {
+      console.error("Failed to create comment:", error);
+    } finally {
+      setIsSubmittingComment(false);
+    }
+  };
+
+  const handleRelatedPostLike = async (
+    e: React.MouseEvent,
+    relatedPost: Post,
+  ) => {
     e.stopPropagation(); // Prevent navigation when clicking like
-    
+
     const postId = relatedPost._id || relatedPost.id;
     if (!postId) return;
 
     try {
       const response = await tweetService.toggleLike(postId);
-      
-      setRelatedPosts(prev => prev.map(p => 
-        (p._id || p.id) === postId 
-          ? { ...p, isLiked: response.data.liked, likes: response.data.likeCount }
-          : p
-      ));
+
+      setRelatedPosts((prev) =>
+        prev.map((p) =>
+          (p._id || p.id) === postId
+            ? {
+                ...p,
+                isLiked: response.data.liked,
+                likes: response.data.likeCount,
+              }
+            : p,
+        ),
+      );
     } catch (error) {
-      console.error('Failed to toggle like:', error);
+      console.error("Failed to toggle like:", error);
     }
   };
 
@@ -99,19 +340,34 @@ export const PostDetailPage: React.FC<PostDetailPageProps> = ({ post, onEditPost
         {/* Post Details */}
         <div className="space-y-4 sm:space-y-6 order-2 xl:order-2">
           <div className="flex items-start justify-between gap-4">
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 leading-tight">{post.title}</h1>
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 leading-tight">
+              {post.title}
+            </h1>
             <button
               onClick={() => onEditPost(post)}
               className="text-gray-600 hover:text-gray-900 p-2 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
               aria-label="Edit post"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 sm:h-6 sm:w-6"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                />
               </svg>
             </button>
           </div>
 
-          <p className="text-sm sm:text-base lg:text-lg text-gray-600 leading-relaxed">{post.content}</p>
+          <p className="text-sm sm:text-base lg:text-lg text-gray-600 leading-relaxed">
+            {post.content}
+          </p>
 
           {/* Tags */}
           {post.tags && post.tags.length > 0 && (
@@ -136,34 +392,163 @@ export const PostDetailPage: React.FC<PostDetailPageProps> = ({ post, onEditPost
                 className="w-12 h-12 sm:w-14 sm:h-14 lg:w-16 lg:h-16 rounded-full object-cover ring-2 ring-white shadow-sm"
               />
               <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-base sm:text-lg text-gray-900 truncate">{post.user.fullName}</h3>
-                <p className="text-sm sm:text-base text-gray-500 truncate">@{post.user.username}</p>
-                <p className="text-xs sm:text-sm text-gray-500">{new Date(post.createdAt).toLocaleDateString()}</p>
+                <h3 className="font-semibold text-base sm:text-lg text-gray-900 truncate">
+                  {post.user.fullName}
+                </h3>
+                <p className="text-sm sm:text-base text-gray-500 truncate">
+                  @{post.user.username}
+                </p>
+                <p className="text-xs sm:text-sm text-gray-500">
+                  {new Date(post.createdAt).toLocaleDateString()}
+                </p>
               </div>
             </div>
           )}
 
           {/* Post Stats */}
           <div className="flex items-center flex-wrap gap-4 sm:gap-6 text-gray-500 bg-white border border-gray-200 rounded-xl p-4">
-            <div className="flex items-center space-x-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+            <button
+              onClick={handleLike}
+              disabled={isTogglingLike}
+              className={`flex items-center space-x-2 transition-colors ${isLiked ? "text-red-500" : "text-gray-500 hover:text-red-500"}`}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className={`h-5 w-5 ${isLiked ? "fill-current" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+                />
               </svg>
-              <span className="text-sm sm:text-base font-medium">{post.likes} likes</span>
-            </div>
+              <span className="text-sm sm:text-base font-medium">
+                {likeCount} likes
+              </span>
+            </button>
             <div className="flex items-center space-x-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 text-blue-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                />
               </svg>
-                             <span className="text-sm sm:text-base font-medium">{post.comments || 0} comments</span>
+              <span className="text-sm sm:text-base font-medium">
+                {commentCount} comments
+              </span>
             </div>
             {post.views && post.views > 0 && (
               <div className="flex items-center space-x-2">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5 text-green-500"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                  />
                 </svg>
-                <span className="text-sm sm:text-base font-medium">{post.views.toLocaleString()} views</span>
+                <span className="text-sm sm:text-base font-medium">
+                  {post.views.toLocaleString()} views
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Comments */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-900 mb-3">
+              Comments ({commentCount})
+            </h2>
+
+            <form
+              onSubmit={handleCommentSubmit}
+              className="flex flex-col sm:flex-row gap-2 mb-4"
+            >
+              <input
+                type="text"
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                placeholder="Add a comment..."
+                className="flex-1 px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all"
+                maxLength={280}
+              />
+              <button
+                type="submit"
+                disabled={!newComment.trim() || isSubmittingComment}
+                className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+              >
+                Post
+              </button>
+            </form>
+
+            {isLoadingComments && comments.length === 0 ? (
+              <div className="flex justify-center py-6">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-500"></div>
+              </div>
+            ) : comments.length > 0 ? (
+              <div
+                ref={commentsContainerRef}
+                className="space-y-3 max-h-80 overflow-y-auto pr-1"
+              >
+                {comments.map((comment) => (
+                  <div key={comment._id} className="flex items-start space-x-3">
+                    <img
+                      src={comment.user.pfp}
+                      alt={comment.user.fullName}
+                      className="w-8 h-8 rounded-full object-cover"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="bg-gray-50 rounded-lg px-3 py-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {comment.user.fullName}
+                        </p>
+                        <p className="text-xs text-gray-500 mb-1">
+                          @{comment.user.username}
+                        </p>
+                        <p className="text-sm text-gray-700 break-words">
+                          {comment.content}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {isLoadingMoreComments && (
+                  <div className="py-2 text-center text-xs text-gray-500">
+                    Loading more comments...
+                  </div>
+                )}
+
+                <div ref={commentsSentinelRef} className="h-1" />
+              </div>
+            ) : (
+              <div className="text-center py-6 text-gray-500">
+                <MessageCircle className="w-7 h-7 mx-auto mb-2 opacity-50" />
+                <p>No comments yet. Be the first to comment.</p>
               </div>
             )}
           </div>
@@ -172,17 +557,19 @@ export const PostDetailPage: React.FC<PostDetailPageProps> = ({ post, onEditPost
 
       {/* Related Posts */}
       <div className="mt-8 sm:mt-12 lg:mt-16">
-        <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6 lg:mb-8 text-gray-900">More like this</h2>
-        
+        <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold mb-4 sm:mb-6 lg:mb-8 text-gray-900">
+          More like this
+        </h2>
+
         {isLoadingRelated ? (
           <div className="flex justify-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-500"></div>
           </div>
         ) : relatedPosts.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-            {relatedPosts.map(relatedPost => (
-              <div 
-                key={relatedPost._id || relatedPost.id} 
+            {relatedPosts.map((relatedPost) => (
+              <div
+                key={relatedPost._id || relatedPost.id}
                 className="relative rounded-xl overflow-hidden group cursor-pointer bg-white shadow-sm hover:shadow-lg transition-all duration-300"
                 onClick={() => handleRelatedPostClick(relatedPost)}
               >
@@ -193,14 +580,14 @@ export const PostDetailPage: React.FC<PostDetailPageProps> = ({ post, onEditPost
                     className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                   />
                 </div>
-                
+
                 {/* Overlay with post info */}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                   <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 right-3 sm:right-4">
                     <h3 className="text-white font-semibold text-sm sm:text-base line-clamp-2 leading-tight mb-2">
                       {relatedPost.title}
                     </h3>
-                    
+
                     {/* Author info */}
                     {relatedPost.user && (
                       <div className="flex items-center space-x-2 mb-2">
@@ -214,28 +601,34 @@ export const PostDetailPage: React.FC<PostDetailPageProps> = ({ post, onEditPost
                         </span>
                       </div>
                     )}
-                    
+
                     {/* Stats */}
                     <div className="flex items-center space-x-4">
-                      <button 
+                      <button
                         onClick={(e) => handleRelatedPostLike(e, relatedPost)}
                         className="flex items-center space-x-1 hover:scale-110 transition-transform"
                       >
-                        <Heart 
-                          className={`w-4 h-4 ${relatedPost.isLiked ? 'fill-current text-red-400' : 'text-red-400'}`} 
+                        <Heart
+                          className={`w-4 h-4 ${relatedPost.isLiked ? "fill-current text-red-400" : "text-red-400"}`}
                         />
-                        <span className="text-white text-sm">{relatedPost.likes || 0}</span>
+                        <span className="text-white text-sm">
+                          {relatedPost.likes || 0}
+                        </span>
                       </button>
-                      
-                                             <div className="flex items-center space-x-1">
-                         <MessageCircle className="w-4 h-4 text-blue-400" />
-                         <span className="text-white text-sm">{relatedPost.comments || 0}</span>
-                       </div>
-                      
+
+                      <div className="flex items-center space-x-1">
+                        <MessageCircle className="w-4 h-4 text-blue-400" />
+                        <span className="text-white text-sm">
+                          {relatedPost.comments || 0}
+                        </span>
+                      </div>
+
                       {relatedPost.views && relatedPost.views > 0 && (
                         <div className="flex items-center space-x-1">
                           <Eye className="w-4 h-4 text-green-400" />
-                          <span className="text-white text-sm">{relatedPost.views}</span>
+                          <span className="text-white text-sm">
+                            {relatedPost.views}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -252,4 +645,4 @@ export const PostDetailPage: React.FC<PostDetailPageProps> = ({ post, onEditPost
       </div>
     </div>
   );
-}; 
+};

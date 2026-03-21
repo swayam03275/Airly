@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { CollectionsPage } from './CollectionsPage';
-import { PostDetailModal } from '../modals/PostDetailModal';
-import { Post } from '../../types';
-import { bookmarkService } from '../../services/bookmarkService';
+import React, { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { seedBookmarkedPosts } from "../../lib/bookmarkState";
+import { bookmarkService } from "../../services/bookmarkService";
+import { Post } from "../../types";
+import { PostDetailModal } from "../modals/PostDetailModal";
+import { CollectionsPage } from "./CollectionsPage";
 
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(false);
@@ -15,8 +16,8 @@ const useIsMobile = () => {
     };
 
     checkIsMobile();
-    window.addEventListener('resize', checkIsMobile);
-    return () => window.removeEventListener('resize', checkIsMobile);
+    window.addEventListener("resize", checkIsMobile);
+    return () => window.removeEventListener("resize", checkIsMobile);
   }, []);
 
   return isMobile;
@@ -32,10 +33,23 @@ export const CollectionsPageWrapper: React.FC = () => {
 
   const fetchBookmarkedPosts = async () => {
     try {
-      const response = await bookmarkService.getUserBookmarkedPosts(undefined, 50); 
-      setPosts(response.tweets || []);
+      const response = await bookmarkService.getUserBookmarkedPosts(
+        undefined,
+        50,
+      );
+      const normalizedTweets = (response.tweets || []).map((post) => ({
+        ...post,
+        isBookmarked: true,
+      }));
+
+      const bookmarkedIds = normalizedTweets
+        .map((post) => post._id || post.id)
+        .filter((id): id is string => Boolean(id));
+      seedBookmarkedPosts(bookmarkedIds);
+
+      setPosts(normalizedTweets);
     } catch (error) {
-      console.error('Failed to fetch bookmarked posts for navigation:', error);
+      console.error("Failed to fetch bookmarked posts for navigation:", error);
       setPosts([]);
     }
   };
@@ -47,13 +61,13 @@ export const CollectionsPageWrapper: React.FC = () => {
   useEffect(() => {
     if (!isMobile) {
       if (postId && posts.length > 0) {
-        const post = posts.find(p => (p._id || p.id) === postId);
-        
+        const post = posts.find((p) => (p._id || p.id) === postId);
+
         if (post) {
           setSelectedPost(post);
           setCurrentPostIndex(posts.indexOf(post));
         } else {
-          navigate('/saved', { replace: true });
+          navigate("/saved", { replace: true });
         }
       } else if (!postId) {
         setSelectedPost(null);
@@ -68,7 +82,7 @@ export const CollectionsPageWrapper: React.FC = () => {
 
   const handlePostClick = (post: Post) => {
     const postId = post._id || post.id;
-    
+
     if (postId) {
       if (isMobile) {
         navigate(`/post/${postId}`, { state: { post } });
@@ -79,7 +93,7 @@ export const CollectionsPageWrapper: React.FC = () => {
   };
 
   const handleCloseModal = () => {
-    navigate('/saved', { replace: false });
+    navigate("/saved", { replace: false });
   };
 
   const handlePreviousPost = () => {
@@ -99,42 +113,48 @@ export const CollectionsPageWrapper: React.FC = () => {
   };
 
   const handleEditPost = (post: Post) => {
-    console.log('Edit', post);
+    console.log("Edit", post);
   };
 
   const handlePostUpdate = (updatedPost: Partial<Post>) => {
-    setPosts(prevPosts => 
-      prevPosts.map(post => 
+    setPosts((prevPosts) =>
+      prevPosts.map((post) =>
         (post._id || post.id) === (updatedPost._id || updatedPost.id)
           ? { ...post, ...updatedPost }
-          : post
-      )
+          : post,
+      ),
     );
-    
-    if (selectedPost && ((selectedPost._id || selectedPost.id) === (updatedPost._id || updatedPost.id))) {
+
+    if (
+      selectedPost &&
+      (selectedPost._id || selectedPost.id) ===
+        (updatedPost._id || updatedPost.id)
+    ) {
       setSelectedPost({ ...selectedPost, ...updatedPost });
     }
   };
 
   const handleTagClick = (tag: string) => {
-    navigate(`/dashboard?tag=${tag}`, { replace: false });
+    navigate(`/dashboard?tag=${encodeURIComponent(tag)}`, { replace: false });
   };
 
   return (
     <>
-      <CollectionsPage 
-        onPostClick={handlePostClick} 
+      <CollectionsPage
+        onPostClick={handlePostClick}
         onEditPost={handleEditPost}
         onTagClick={handleTagClick}
       />
-      
+
       {/* Only show modal on desktop */}
       {!isMobile && selectedPost && (
         <PostDetailModal
           post={selectedPost}
           onClose={handleCloseModal}
           onPrevious={currentPostIndex > 0 ? handlePreviousPost : undefined}
-          onNext={currentPostIndex < posts.length - 1 ? handleNextPost : undefined}
+          onNext={
+            currentPostIndex < posts.length - 1 ? handleNextPost : undefined
+          }
           hasPrevious={currentPostIndex > 0}
           hasNext={currentPostIndex < posts.length - 1}
           onPostUpdate={handlePostUpdate}
@@ -142,4 +162,4 @@ export const CollectionsPageWrapper: React.FC = () => {
       )}
     </>
   );
-}; 
+};

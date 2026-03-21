@@ -1,4 +1,4 @@
-import axios from '../lib/axios';
+import axios from "../lib/axios";
 
 export interface CreateTweetData {
   title: string;
@@ -43,39 +43,42 @@ export interface ApiResponse<T> {
 class TweetService {
   async createTweet(data: CreateTweetData): Promise<ApiResponse<Tweet>> {
     const formData = new FormData();
-    formData.append('title', data.title);
-    formData.append('content', data.content);
-    formData.append('media', data.media);
-    
+    formData.append("title", data.title);
+    formData.append("content", data.content);
+    formData.append("media", data.media);
+
     if (data.tags && data.tags.length > 0) {
-      data.tags.forEach(tag => {
-        formData.append('tags[]', tag);
+      data.tags.forEach((tag) => {
+        formData.append("tags[]", tag);
       });
     }
 
-    const response = await axios.post('/tweets/create', formData, {
+    const response = await axios.post("/tweets/create", formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
+        "Content-Type": "multipart/form-data",
       },
     });
     return response.data;
   }
 
-  async editTweet(tweetId: string, data: EditTweetData): Promise<ApiResponse<Tweet>> {
+  async editTweet(
+    tweetId: string,
+    data: EditTweetData,
+  ): Promise<ApiResponse<Tweet>> {
     const formData = new FormData();
-    if (data.title) formData.append('title', data.title);
-    if (data.content) formData.append('content', data.content);
-    if (data.media) formData.append('media', data.media);
-    
+    if (data.title) formData.append("title", data.title);
+    if (data.content) formData.append("content", data.content);
+    if (data.media) formData.append("media", data.media);
+
     if (data.tags && data.tags.length > 0) {
-      data.tags.forEach(tag => {
-        formData.append('tags[]', tag);
+      data.tags.forEach((tag) => {
+        formData.append("tags[]", tag);
       });
     }
 
     const response = await axios.patch(`/tweets/${tweetId}`, formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
+        "Content-Type": "multipart/form-data",
       },
     });
     return response.data;
@@ -86,10 +89,15 @@ class TweetService {
     return response.data;
   }
 
-  async getTweets(cursor?: string, batch = 20): Promise<ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>> {
+  async getTweets(
+    cursor?: string,
+    batch = 20,
+  ): Promise<
+    ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>
+  > {
     const params = new URLSearchParams();
-    if (cursor) params.append('cursor', cursor);
-    params.append('batch', batch.toString());
+    if (cursor) params.append("cursor", cursor);
+    params.append("batch", batch.toString());
 
     const response = await axios.get(`/tweets?${params.toString()}`);
     return response.data;
@@ -100,73 +108,139 @@ class TweetService {
     return response.data;
   }
 
-  async toggleLike(tweetId: string): Promise<ApiResponse<{ liked: boolean; likeCount: number }>> {
+  async toggleLike(
+    tweetId: string,
+  ): Promise<ApiResponse<{ liked: boolean; likeCount: number }>> {
     const response = await axios.post(`/likes/tweets/${tweetId}/like`);
-    return response.data;
+    const payload = response.data?.data ?? response.data;
+
+    const liked = Boolean(
+      payload?.liked ?? payload?.isLiked ?? payload?.likeStatus ?? false,
+    );
+    const likeCount = Number(
+      payload?.likeCount ?? payload?.likesCount ?? payload?.likes ?? 0,
+    );
+
+    return {
+      ...response.data,
+      data: {
+        liked,
+        likeCount,
+      },
+    };
   }
 
-  async getLikeCount(tweetId: string): Promise<ApiResponse<{ likeCount: number }>> {
+  async getLikeCount(
+    tweetId: string,
+  ): Promise<ApiResponse<{ likeCount: number }>> {
     const response = await axios.get(`/likes/tweets/${tweetId}/likes`);
-    return response.data;
+    const payload = response.data?.data ?? response.data;
+
+    return {
+      ...response.data,
+      data: {
+        likeCount: Number(
+          payload?.likeCount ?? payload?.likesCount ?? payload?.likes ?? 0,
+        ),
+      },
+    };
   }
 
-  async checkUserLiked(tweetId: string): Promise<ApiResponse<{ liked: boolean }>> {
+  async checkUserLiked(
+    tweetId: string,
+  ): Promise<ApiResponse<{ liked: boolean }>> {
     const response = await axios.get(`/likes/tweets/${tweetId}/liked`);
     return response.data;
   }
 
-  async getMostLikedTweets(limit = 10, cursor?: string): Promise<ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>> {
+  async getMostLikedTweets(
+    limit = 10,
+    cursor?: string,
+  ): Promise<
+    ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>
+  > {
     const params = new URLSearchParams();
-    params.append('limit', limit.toString());
-    if (cursor) params.append('cursor', cursor);
+    params.append("limit", limit.toString());
+    if (cursor) params.append("cursor", cursor);
 
-    const response = await axios.get(`/likes/tweets/most-liked?${params.toString()}`);
+    const response = await axios.get(
+      `/likes/tweets/most-liked?${params.toString()}`,
+    );
     return response.data;
   }
 
-  async getUserLikedTweets(cursor?: string, batch = 12): Promise<ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>> {
+  async getUserLikedTweets(
+    cursor?: string,
+    batch = 12,
+  ): Promise<
+    ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>
+  > {
     const params = new URLSearchParams();
-    if (cursor) params.append('cursor', cursor);
-    params.append('batch', batch.toString());
+    if (cursor) params.append("cursor", cursor);
+    params.append("batch", batch.toString());
 
-    const response = await axios.get(`/likes/user/liked-tweets?${params.toString()}`);
+    const response = await axios.get(
+      `/likes/user/liked-tweets?${params.toString()}`,
+    );
     return response.data;
   }
 
-  async toggleBookmark(tweetId: string): Promise<ApiResponse<{ bookmarked: boolean; bookmarkCount: number }>> {
+  async toggleBookmark(
+    tweetId: string,
+  ): Promise<ApiResponse<{ bookmarked: boolean; bookmarkCount: number }>> {
     const response = await axios.post(`/bookmarks/tweets/${tweetId}/bookmark`);
     return response.data;
   }
 
-  async getBookmarkCount(tweetId: string): Promise<ApiResponse<{ bookmarkCount: number }>> {
+  async getBookmarkCount(
+    tweetId: string,
+  ): Promise<ApiResponse<{ bookmarkCount: number }>> {
     const response = await axios.get(`/bookmarks/tweets/${tweetId}/bookmarks`);
     return response.data;
   }
 
-  async checkUserBookmarked(tweetId: string): Promise<ApiResponse<{ bookmarked: boolean }>> {
+  async checkUserBookmarked(
+    tweetId: string,
+  ): Promise<ApiResponse<{ bookmarked: boolean }>> {
     const response = await axios.get(`/bookmarks/tweets/${tweetId}/bookmarked`);
     return response.data;
   }
 
-  async getMostBookmarkedTweets(limit = 10, cursor?: string): Promise<ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>> {
+  async getMostBookmarkedTweets(
+    limit = 10,
+    cursor?: string,
+  ): Promise<
+    ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>
+  > {
     const params = new URLSearchParams();
-    params.append('limit', limit.toString());
-    if (cursor) params.append('cursor', cursor);
+    params.append("limit", limit.toString());
+    if (cursor) params.append("cursor", cursor);
 
-    const response = await axios.get(`/bookmarks/tweets/most-bookmarked?${params.toString()}`);
+    const response = await axios.get(
+      `/bookmarks/tweets/most-bookmarked?${params.toString()}`,
+    );
     return response.data;
   }
 
-  async getUserBookmarkedTweets(cursor?: string, batch = 12): Promise<ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>> {
+  async getUserBookmarkedTweets(
+    cursor?: string,
+    batch = 12,
+  ): Promise<
+    ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>
+  > {
     const params = new URLSearchParams();
-    if (cursor) params.append('cursor', cursor);
-    params.append('batch', batch.toString());
+    if (cursor) params.append("cursor", cursor);
+    params.append("batch", batch.toString());
 
-    const response = await axios.get(`/bookmarks/user/bookmarked-tweets?${params.toString()}`);
+    const response = await axios.get(
+      `/bookmarks/user/bookmarked-tweets?${params.toString()}`,
+    );
     return response.data;
   }
 
-  async incrementView(tweetId: string): Promise<ApiResponse<{ views: number }>> {
+  async incrementView(
+    tweetId: string,
+  ): Promise<ApiResponse<{ views: number }>> {
     const response = await axios.post(`/views/tweets/${tweetId}/view`);
     return response.data;
   }
@@ -176,44 +250,76 @@ class TweetService {
     return response.data;
   }
 
-  async getMostViewedTweets(limit = 10, cursor?: string): Promise<ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>> {
+  async getMostViewedTweets(
+    limit = 10,
+    cursor?: string,
+  ): Promise<
+    ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>
+  > {
     const params = new URLSearchParams();
-    params.append('limit', limit.toString());
-    if (cursor) params.append('cursor', cursor);
+    params.append("limit", limit.toString());
+    if (cursor) params.append("cursor", cursor);
 
-    const response = await axios.get(`/views/tweets/most-viewed?${params.toString()}`);
+    const response = await axios.get(
+      `/views/tweets/most-viewed?${params.toString()}`,
+    );
     return response.data;
   }
 
-  async getUserViewedTweets(cursor?: string, batch = 12): Promise<ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>> {
+  async getUserViewedTweets(
+    cursor?: string,
+    batch = 12,
+  ): Promise<
+    ApiResponse<{ tweets: Tweet[]; hasMore: boolean; nextCursor?: string }>
+  > {
     const params = new URLSearchParams();
-    if (cursor) params.append('cursor', cursor);
-    params.append('batch', batch.toString());
+    if (cursor) params.append("cursor", cursor);
+    params.append("batch", batch.toString());
 
-    const response = await axios.get(`/views/user/viewed-tweets?${params.toString()}`);
+    const response = await axios.get(
+      `/views/user/viewed-tweets?${params.toString()}`,
+    );
     return response.data;
   }
 
-  async getComments(tweetId: string, cursor?: string, batch = 20): Promise<ApiResponse<{ comments: any[]; hasMore: boolean; nextCursor?: string }>> {
+  async getComments(
+    tweetId: string,
+    cursor?: string,
+    batch = 20,
+  ): Promise<
+    ApiResponse<{ comments: any[]; hasMore: boolean; nextCursor?: string }>
+  > {
     const params = new URLSearchParams();
-    if (cursor) params.append('cursor', cursor);
-    params.append('batch', batch.toString());
+    if (cursor) params.append("cursor", cursor);
+    params.append("batch", batch.toString());
 
-    const response = await axios.get(`/tweets/${tweetId}/comments?${params.toString()}`);
+    const response = await axios.get(
+      `/tweets/${tweetId}/comments?${params.toString()}`,
+    );
     return response.data;
   }
 
-  async createComment(tweetId: string, content: string): Promise<ApiResponse<any>> {
-    const response = await axios.post(`/tweets/${tweetId}/comments`, { content });
+  async createComment(
+    tweetId: string,
+    content: string,
+  ): Promise<ApiResponse<any>> {
+    const response = await axios.post(`/tweets/${tweetId}/comments`, {
+      content,
+    });
     return response.data;
   }
 
-  async getCommentCount(tweetId: string): Promise<ApiResponse<{ count: number }>> {
+  async getCommentCount(
+    tweetId: string,
+  ): Promise<ApiResponse<{ count: number }>> {
     const response = await axios.get(`/tweets/${tweetId}/comments/count`);
     return response.data;
   }
 
-  async editComment(commentId: string, content: string): Promise<ApiResponse<any>> {
+  async editComment(
+    commentId: string,
+    content: string,
+  ): Promise<ApiResponse<any>> {
     const response = await axios.patch(`/comments/${commentId}`, { content });
     return response.data;
   }
@@ -228,45 +334,64 @@ class TweetService {
     return response.data;
   }
 
-  async searchContent(query: string, type: 'all' | 'tweets' | 'users' = 'all', cursor?: string, batch = 20): Promise<ApiResponse<{
-    tweets: Tweet[];
-    users: any[];
-    hasMore: boolean;
-    nextCursor?: string;
-    searchQuery: string;
-    searchType: string;
-    totalResults: number;
-  }>> {
+  async searchContent(
+    query: string,
+    type: "all" | "tweets" | "users" = "all",
+    cursor?: string,
+    batch = 20,
+  ): Promise<
+    ApiResponse<{
+      tweets: Tweet[];
+      users: any[];
+      hasMore: boolean;
+      nextCursor?: string;
+      searchQuery: string;
+      searchType: string;
+      totalResults: number;
+    }>
+  > {
     const params = new URLSearchParams();
-    params.append('q', query);
-    params.append('type', type);
-    params.append('batch', batch.toString());
-    if (cursor) params.append('cursor', cursor);
+    params.append("q", query);
+    params.append("type", type);
+    params.append("batch", batch.toString());
+    if (cursor) params.append("cursor", cursor);
 
     const response = await axios.get(`/tweets/search?${params.toString()}`);
     return response.data;
   }
 
-  async searchTweetsByTags(tags: string, cursor?: string, batch = 20): Promise<ApiResponse<{
-    tweets: Tweet[];
-    hasMore: boolean;
-    nextCursor?: string;
-    searchTags: string[];
-  }>> {
+  async searchTweetsByTags(
+    tags: string,
+    cursor?: string,
+    batch = 20,
+  ): Promise<
+    ApiResponse<{
+      tweets: Tweet[];
+      hasMore: boolean;
+      nextCursor?: string;
+      searchTags: string[];
+    }>
+  > {
     const params = new URLSearchParams();
-    params.append('tags', tags);
-    params.append('batch', batch.toString());
-    if (cursor) params.append('cursor', cursor);
+    params.append("tags", tags);
+    params.append("batch", batch.toString());
+    if (cursor) params.append("cursor", cursor);
 
-    const response = await axios.get(`/tweets/search/tags?${params.toString()}`);
+    const response = await axios.get(
+      `/tweets/search/tags?${params.toString()}`,
+    );
     return response.data;
   }
 
-  async getPopularTags(limit = 20): Promise<ApiResponse<{ tags: Array<{ tag: string; count: number }> }>> {
+  async getPopularTags(
+    limit = 20,
+  ): Promise<ApiResponse<{ tags: Array<{ tag: string; count: number }> }>> {
     const params = new URLSearchParams();
-    params.append('limit', limit.toString());
+    params.append("limit", limit.toString());
 
-    const response = await axios.get(`/tweets/popular-tags?${params.toString()}`);
+    const response = await axios.get(
+      `/tweets/popular-tags?${params.toString()}`,
+    );
     return response.data;
   }
 
@@ -275,4 +400,4 @@ class TweetService {
   }
 }
 
-export const tweetService = new TweetService(); 
+export const tweetService = new TweetService();

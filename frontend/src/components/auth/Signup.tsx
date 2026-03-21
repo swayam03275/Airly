@@ -222,7 +222,7 @@ export const Signup: React.FC = () => {
     setIsLoading(true);
 
     try {
-      await userService.register({
+     await userService.register({
         fullName: name.trim(),
         username: username.toLowerCase().trim(),
         email: email.toLowerCase().trim(),

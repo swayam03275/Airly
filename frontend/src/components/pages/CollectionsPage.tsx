@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Bookmark, AlertCircle, RefreshCw } from 'lucide-react';
-import { PostGrid } from '../posts/PostGrid';
-import { Post } from '../../types';
-import { bookmarkService } from '../../services/bookmarkService';
+import { AlertCircle, Bookmark, RefreshCw } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { seedBookmarkedPosts } from "../../lib/bookmarkState";
+import { bookmarkService } from "../../services/bookmarkService";
+import { Post } from "../../types";
+import { PostGrid } from "../posts/PostGrid";
 
 interface CollectionsPageProps {
   onPostClick: (post: Post) => void;
@@ -10,10 +11,10 @@ interface CollectionsPageProps {
   onTagClick?: (tag: string) => void;
 }
 
-export const CollectionsPage: React.FC<CollectionsPageProps> = ({ 
-  onPostClick, 
+export const CollectionsPage: React.FC<CollectionsPageProps> = ({
+  onPostClick,
   onEditPost,
-  onTagClick
+  onTagClick,
 }) => {
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -21,26 +22,41 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | undefined>();
 
-  const fetchBookmarkedPosts = async (cursor?: string, append: boolean = false) => {
+  const fetchBookmarkedPosts = async (
+    cursor?: string,
+    append: boolean = false,
+  ) => {
     try {
       if (!append) {
         setIsLoading(true);
         setError(null);
       }
-      
+
       const response = await bookmarkService.getUserBookmarkedPosts(cursor, 12);
-      
+      const normalizedTweets = (response.tweets || []).map((post) => ({
+        ...post,
+        isBookmarked: true,
+      }));
+
+      const bookmarkedIds = normalizedTweets
+        .map((post) => post._id || post.id)
+        .filter((id): id is string => Boolean(id));
+      seedBookmarkedPosts(bookmarkedIds);
+
       if (append) {
-        setPosts(prevPosts => [...prevPosts, ...response.tweets]);
+        setPosts((prevPosts) => [...prevPosts, ...normalizedTweets]);
       } else {
-        setPosts(response.tweets);
+        setPosts(normalizedTweets);
       }
-      
+
       setHasMore(response.hasMore);
       setNextCursor(response.nextCursor);
     } catch (error: any) {
-      console.error('Failed to fetch bookmarked posts:', error);
-      setError(error.response?.data?.message || 'Failed to load your saved posts. Please try again.');
+      console.error("Failed to fetch bookmarked posts:", error);
+      setError(
+        error.response?.data?.message ||
+          "Failed to load your saved posts. Please try again.",
+      );
       if (!append) {
         setPosts([]);
       }
@@ -68,7 +84,9 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
       <div className="space-y-4 sm:space-y-6">
         <div className="bg-white/80 backdrop-blur-xl rounded-2xl sm:rounded-3xl shadow-sm p-6 sm:p-8 border border-gray-100/50 text-center">
           <AlertCircle className="h-12 w-12 sm:h-16 sm:w-16 text-red-400 mx-auto mb-4" />
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">Unable to Load Collections</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
+            Unable to Load Collections
+          </h2>
           <p className="text-sm sm:text-base text-gray-600 mb-6">{error}</p>
           <button
             onClick={handleRetry}
@@ -89,12 +107,15 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
           <div className="h-12 w-12 sm:h-16 sm:w-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Bookmark className="h-6 w-6 sm:h-8 sm:w-8 text-blue-400" />
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">No Collections Yet</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
+            No Collections Yet
+          </h2>
           <p className="text-sm sm:text-base text-gray-600 mb-4">
-            You haven't saved any posts yet. Start building your collection by bookmarking posts you want to revisit!
+            You haven't saved any posts yet. Start building your collection by
+            bookmarking posts you want to revisit!
           </p>
           <button
-            onClick={() => window.location.href = '/dashboard'}
+            onClick={() => (window.location.href = "/dashboard")}
             className="inline-flex items-center space-x-2 px-4 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-xl font-medium hover:from-amber-500 hover:to-orange-600 transition-all duration-200 shadow-lg hover:shadow-xl text-sm sm:text-base"
           >
             <span>Explore Posts</span>
@@ -116,7 +137,9 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
             <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
               Your Collections
             </h1>
-            <p className="text-sm sm:text-base text-gray-600">Posts you've saved for later</p>
+            <p className="text-sm sm:text-base text-gray-600">
+              Posts you've saved for later
+            </p>
           </div>
         </div>
       </div>
@@ -124,14 +147,15 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
       {/* Results Info */}
       <div className="flex items-center justify-between px-2 sm:px-0">
         <p className="text-sm sm:text-base text-gray-600">
-          <span className="font-semibold text-gray-900">{posts.length}</span> saved posts
+          <span className="font-semibold text-gray-900">{posts.length}</span>{" "}
+          saved posts
         </p>
       </div>
 
       {/* Posts Grid */}
-      <PostGrid 
-        posts={posts} 
-        onEditPost={onEditPost} 
+      <PostGrid
+        posts={posts}
+        onEditPost={onEditPost}
         onPostClick={onPostClick}
         onLoadMore={handleLoadMore}
         hasMore={hasMore}
@@ -140,4 +164,4 @@ export const CollectionsPage: React.FC<CollectionsPageProps> = ({
       />
     </div>
   );
-}; 
+};

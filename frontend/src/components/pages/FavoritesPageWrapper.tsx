@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { FavoritesPage } from './FavoritesPage';
-import { PostDetailModal } from '../modals/PostDetailModal';
-import { Post } from '../../types';
-import { likeService } from '../../services/likeService';
+import React, { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { seedLikedPosts } from "../../lib/likeState";
+import { likeService } from "../../services/likeService";
+import { Post } from "../../types";
+import { PostDetailModal } from "../modals/PostDetailModal";
+import { FavoritesPage } from "./FavoritesPage";
 
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(false);
@@ -15,8 +16,8 @@ const useIsMobile = () => {
     };
 
     checkIsMobile();
-    window.addEventListener('resize', checkIsMobile);
-    return () => window.removeEventListener('resize', checkIsMobile);
+    window.addEventListener("resize", checkIsMobile);
+    return () => window.removeEventListener("resize", checkIsMobile);
   }, []);
 
   return isMobile;
@@ -25,7 +26,6 @@ const useIsMobile = () => {
 export const FavoritesPageWrapper: React.FC = () => {
   const navigate = useNavigate();
   const { postId } = useParams<{ postId: string }>();
-  const location = useLocation();
   const isMobile = useIsMobile();
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [currentPostIndex, setCurrentPostIndex] = useState<number>(-1);
@@ -34,9 +34,19 @@ export const FavoritesPageWrapper: React.FC = () => {
   const fetchLikedPosts = async () => {
     try {
       const response = await likeService.getUserLikedPosts(undefined, 50); // Get more for navigation
-      setPosts(response.tweets || []);
+      const normalizedTweets = (response.tweets || []).map((post) => ({
+        ...post,
+        isLiked: true,
+      }));
+
+      const likedIds = normalizedTweets
+        .map((post) => post._id || post.id)
+        .filter((id): id is string => Boolean(id));
+      seedLikedPosts(likedIds);
+
+      setPosts(normalizedTweets);
     } catch (error) {
-      console.error('Failed to fetch liked posts for navigation:', error);
+      console.error("Failed to fetch liked posts for navigation:", error);
       setPosts([]);
     }
   };
@@ -48,13 +58,13 @@ export const FavoritesPageWrapper: React.FC = () => {
   useEffect(() => {
     if (!isMobile) {
       if (postId && posts.length > 0) {
-        const post = posts.find(p => (p._id || p.id) === postId);
-        
+        const post = posts.find((p) => (p._id || p.id) === postId);
+
         if (post) {
           setSelectedPost(post);
           setCurrentPostIndex(posts.indexOf(post));
         } else {
-          navigate('/favorites', { replace: true });
+          navigate("/favorites", { replace: true });
         }
       } else if (!postId) {
         setSelectedPost(null);
@@ -69,7 +79,7 @@ export const FavoritesPageWrapper: React.FC = () => {
 
   const handlePostClick = (post: Post) => {
     const postId = post._id || post.id;
-    
+
     if (postId) {
       if (isMobile) {
         navigate(`/post/${postId}`, { state: { post } });
@@ -80,7 +90,7 @@ export const FavoritesPageWrapper: React.FC = () => {
   };
 
   const handleCloseModal = () => {
-    navigate('/favorites', { replace: false });
+    navigate("/favorites", { replace: false });
   };
 
   const handlePreviousPost = () => {
@@ -100,42 +110,48 @@ export const FavoritesPageWrapper: React.FC = () => {
   };
 
   const handleEditPost = (post: Post) => {
-    console.log('Edit post:', post);
+    console.log("Edit post:", post);
   };
 
   const handlePostUpdate = (updatedPost: Partial<Post>) => {
-    setPosts(prevPosts => 
-      prevPosts.map(post => 
+    setPosts((prevPosts) =>
+      prevPosts.map((post) =>
         (post._id || post.id) === (updatedPost._id || updatedPost.id)
           ? { ...post, ...updatedPost }
-          : post
-      )
+          : post,
+      ),
     );
-    
-    if (selectedPost && ((selectedPost._id || selectedPost.id) === (updatedPost._id || updatedPost.id))) {
+
+    if (
+      selectedPost &&
+      (selectedPost._id || selectedPost.id) ===
+        (updatedPost._id || updatedPost.id)
+    ) {
       setSelectedPost({ ...selectedPost, ...updatedPost });
     }
   };
 
   const handleTagClick = (tag: string) => {
-    navigate(`/dashboard?tag=${tag}`, { replace: false });
+    navigate(`/dashboard?tag=${encodeURIComponent(tag)}`, { replace: false });
   };
 
   return (
     <>
-      <FavoritesPage 
-        onPostClick={handlePostClick} 
+      <FavoritesPage
+        onPostClick={handlePostClick}
         onEditPost={handleEditPost}
         onTagClick={handleTagClick}
       />
-      
+
       {/* Only show modal on desktop */}
       {!isMobile && selectedPost && (
         <PostDetailModal
           post={selectedPost}
           onClose={handleCloseModal}
           onPrevious={currentPostIndex > 0 ? handlePreviousPost : undefined}
-          onNext={currentPostIndex < posts.length - 1 ? handleNextPost : undefined}
+          onNext={
+            currentPostIndex < posts.length - 1 ? handleNextPost : undefined
+          }
           hasPrevious={currentPostIndex > 0}
           hasNext={currentPostIndex < posts.length - 1}
           onPostUpdate={handlePostUpdate}
@@ -143,4 +159,4 @@ export const FavoritesPageWrapper: React.FC = () => {
       )}
     </>
   );
-}; 
+};

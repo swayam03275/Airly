@@ -1,11 +1,23 @@
-import React, { useState, useRef } from 'react';
-import { X, Upload, Image, Camera,AlertCircle, CheckCircle } from 'lucide-react';
-import { tweetService, CreateTweetData } from '../../services/tweetService';
+import {
+  AlertCircle,
+  Camera,
+  CheckCircle,
+  Image,
+  Upload,
+  X,
+} from "lucide-react";
+import React, { useRef, useState } from "react";
+import { CreateTweetData, tweetService } from "../../services/tweetService";
 
 interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUpload: (data: { title: string; content: string; media: File | null; type: string }) => void;
+  onUpload: (data: {
+    title: string;
+    content: string;
+    media: File | null;
+    type: string;
+  }) => void;
 }
 
 interface ValidationErrors {
@@ -15,46 +27,78 @@ interface ValidationErrors {
   tags?: string;
 }
 
-export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload }) => {
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
+export const UploadModal: React.FC<UploadModalProps> = ({
+  isOpen,
+  onClose,
+  onUpload,
+}) => {
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
   const [tags, setTags] = useState<string[]>([]);
-  const [tagInput, setTagInput] = useState('');
+  const [tagInput, setTagInput] = useState("");
   const [showTagSuggestions, setShowTagSuggestions] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
+  const [validationErrors, setValidationErrors] = useState<ValidationErrors>(
+    {},
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const MAX_CONTENT_LENGTH = 280;
   const MAX_MEDIA_SIZE = 10 * 1024 * 1024; // 10MB in bytes
-  const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+  const ALLOWED_IMAGE_TYPES = [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+  ];
 
   const popularTags = [
-    'photography', 'art', 'nature', 'travel', 'food', 'lifestyle', 'fashion', 
-    'technology', 'design', 'architecture', 'music', 'fitness', 'beauty', 
-    'inspiration', 'creativity', 'minimalism', 'vintage', 'modern', 'abstract'
+    "photography",
+    "art",
+    "nature",
+    "travel",
+    "food",
+    "lifestyle",
+    "fashion",
+    "technology",
+    "design",
+    "architecture",
+    "music",
+    "fitness",
+    "beauty",
+    "inspiration",
+    "creativity",
+    "minimalism",
+    "vintage",
+    "modern",
+    "abstract",
   ];
 
   const getTagSuggestions = () => {
     if (!tagInput.trim()) return popularTags.slice(0, 6);
-    return popularTags.filter(tag => 
-      tag.toLowerCase().includes(tagInput.toLowerCase()) && 
-      !tags.includes(tag)
-    ).slice(0, 6);
+    return popularTags
+      .filter(
+        (tag) =>
+          tag.toLowerCase().includes(tagInput.toLowerCase()) &&
+          !tags.includes(tag),
+      )
+      .slice(0, 6);
   };
 
   if (!isOpen) return null;
   const validateTitle = (value: string): string | undefined => {
     const trimmedValue = value.trim();
     if (trimmedValue.length === 0) {
-      return 'Title is required';
+      return "Title is required";
     }
-    if (trimmedValue.length > 100) { // Reasonable title limit
-      return 'Title must be 100 characters or less';
+    if (trimmedValue.length > 100) {
+      // Reasonable title limit
+      return "Title must be 100 characters or less";
     }
     return undefined;
   };
@@ -62,7 +106,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
   const validateContent = (value: string): string | undefined => {
     const trimmedValue = value.trim();
     if (trimmedValue.length === 0) {
-      return 'Content is required';
+      return "Content is required";
     }
     if (trimmedValue.length > MAX_CONTENT_LENGTH) {
       return `Content must be ${MAX_CONTENT_LENGTH} characters or less`;
@@ -72,23 +116,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
 
   const validateMedia = (file: File | null): string | undefined => {
     if (!file) {
-      return 'Media file is required';
+      return "Media file is required";
     }
-    
+
     if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-      return 'Please upload a valid image file (JPEG, PNG, GIF, or WebP)';
+      return "Please upload a valid image file (JPEG, PNG, GIF, or WebP)";
     }
-    
+
     if (file.size > MAX_MEDIA_SIZE) {
       return `File size must be ${MAX_MEDIA_SIZE / (1024 * 1024)}MB or less`;
     }
-    
+
     return undefined;
   };
 
   const validateTags = (tagArray: string[]): string | undefined => {
     if (tagArray.length > 10) {
-      return 'Maximum 10 tags allowed';
+      return "Maximum 10 tags allowed";
     }
     return undefined;
   };
@@ -96,43 +140,43 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
   const handleTitleChange = (value: string) => {
     setTitle(value);
     const error = validateTitle(value);
-    setValidationErrors(prev => ({ ...prev, title: error }));
+    setValidationErrors((prev) => ({ ...prev, title: error }));
   };
 
   const handleContentChange = (value: string) => {
     setContent(value);
     const error = validateContent(value);
-    setValidationErrors(prev => ({ ...prev, content: error }));
+    setValidationErrors((prev) => ({ ...prev, content: error }));
   };
 
   const handleTagsChange = (newTags: string[]) => {
     setTags(newTags);
     const error = validateTags(newTags);
-    setValidationErrors(prev => ({ ...prev, tags: error }));
+    setValidationErrors((prev) => ({ ...prev, tags: error }));
   };
 
   const addTag = (tag: string) => {
-    const trimmedTag = tag.trim().toLowerCase();
+    const trimmedTag = tag.trim().toLowerCase().replace(/^#+/, "");
     if (trimmedTag && !tags.includes(trimmedTag) && tags.length < 10) {
       const newTags = [...tags, trimmedTag];
       handleTagsChange(newTags);
-      setTagInput('');
+      setTagInput("");
       setShowTagSuggestions(false);
     }
   };
 
   const removeTag = (tagToRemove: string) => {
-    const newTags = tags.filter(tag => tag !== tagToRemove);
+    const newTags = tags.filter((tag) => tag !== tagToRemove);
     handleTagsChange(newTags);
   };
 
   const handleTagInputKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ',') {
+    if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       if (tagInput.trim()) {
         addTag(tagInput);
       }
-    } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+    } else if (e.key === "Backspace" && !tagInput && tags.length > 0) {
       removeTag(tags[tags.length - 1]);
     }
   };
@@ -140,9 +184,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
+    if (e.type === "dragenter" || e.type === "dragover") {
       setDragActive(true);
-    } else if (e.type === 'dragleave') {
+    } else if (e.type === "dragleave") {
       setDragActive(false);
     }
   };
@@ -159,8 +203,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
 
   const handleFile = (file: File) => {
     const mediaError = validateMedia(file);
-    setValidationErrors(prev => ({ ...prev, media: mediaError }));
-    
+    setValidationErrors((prev) => ({ ...prev, media: mediaError }));
+
     if (!mediaError) {
       setSelectedFile(file);
       const reader = new FileReader();
@@ -208,26 +252,26 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
         title: title.trim(),
         content: content.trim(),
         media: selectedFile!,
-        tags: tags 
+        tags: tags,
       };
       const response = await tweetService.createTweet(tweetData);
       onUpload({
         title: response.data.title,
         content: response.data.content,
         media: selectedFile!,
-        type: 'tweet'
+        type: "tweet",
       });
-      
-      setTitle('');
-      setContent('');
+
+      setTitle("");
+      setContent("");
       setTags([]);
-      setTagInput('');
+      setTagInput("");
       setSelectedFile(null);
       setSelectedImage(null);
       setValidationErrors({});
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create tweet');
+      setError(err.response?.data?.message || "Failed to create tweet");
     } finally {
       setIsLoading(false);
     }
@@ -235,17 +279,17 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
 
   const getCharacterCountColor = (count: number, max: number) => {
     const percentage = count / max;
-    if (percentage >= 1) return 'text-red-500';
-    if (percentage >= 0.8) return 'text-orange-500';
-    return 'text-gray-500';
+    if (percentage >= 1) return "text-red-500";
+    if (percentage >= 0.8) return "text-orange-500";
+    return "text-gray-500";
   };
 
   const getFileSizeText = (bytes: number) => {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) return "0 Bytes";
     const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const sizes = ["Bytes", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   };
 
   return (
@@ -258,8 +302,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
               <Camera className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">Create New Tweet</h2>
-              <p className="text-sm text-gray-500">Share your thoughts with the world</p>
+              <h2 className="text-2xl font-bold text-gray-900">
+                Create New Tweet
+              </h2>
+              <p className="text-sm text-gray-500">
+                Share your thoughts with the world
+              </p>
             </div>
           </div>
           <button
@@ -276,7 +324,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
             <label className="block text-sm font-medium text-gray-700 mb-3">
               Upload Image <span className="text-red-500">*</span>
             </label>
-            
+
             {selectedImage ? (
               <div className="relative">
                 <img
@@ -292,7 +340,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                   onClick={() => {
                     setSelectedImage(null);
                     setSelectedFile(null);
-                    setValidationErrors(prev => ({ ...prev, media: 'Media file is required' }));
+                    setValidationErrors((prev) => ({
+                      ...prev,
+                      media: "Media file is required",
+                    }));
                   }}
                   className="absolute top-3 right-3 p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors shadow-lg"
                 >
@@ -303,25 +354,27 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
               <div
                 className={`border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200 ${
                   dragActive
-                    ? 'border-amber-400 bg-amber-50'
+                    ? "border-amber-400 bg-amber-50"
                     : validationErrors.media
-                    ? 'border-red-300 bg-red-50'
-                    : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
+                      ? "border-red-300 bg-red-50"
+                      : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
                 }`}
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleDrop}
               >
-                <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
-                  validationErrors.media 
-                    ? 'bg-red-100 text-red-600'
-                    : 'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-600'
-                }`}>
+                <div
+                  className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+                    validationErrors.media
+                      ? "bg-red-100 text-red-600"
+                      : "bg-gradient-to-r from-amber-100 to-orange-100 text-amber-600"
+                  }`}
+                >
                   <Image className="w-8 h-8" />
                 </div>
                 <p className="text-gray-600 mb-2">
-                  Drag and drop an image here, or{' '}
+                  Drag and drop an image here, or{" "}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -336,13 +389,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept={ALLOWED_IMAGE_TYPES.join(',')}
+                  accept={ALLOWED_IMAGE_TYPES.join(",")}
                   onChange={handleFileSelect}
                   className="hidden"
                 />
               </div>
             )}
-            
+
             {validationErrors.media && (
               <div className="mt-2 flex items-center space-x-2 text-red-600">
                 <AlertCircle className="w-4 h-4" />
@@ -362,8 +415,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
               onChange={(e) => handleTitleChange(e.target.value)}
               className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400 transition-all duration-200 ${
                 validationErrors.title
-                  ? 'border-red-300 bg-red-50'
-                  : 'border-gray-300'
+                  ? "border-red-300 bg-red-50"
+                  : "border-gray-300"
               }`}
               placeholder="Give your tweet a title"
               maxLength={100}
@@ -380,9 +433,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                   <span className="text-sm">Title looks good</span>
                 </div>
               )}
-              <span className="text-xs text-gray-500">
-                {title.length}/100
-              </span>
+              <span className="text-xs text-gray-500">{title.length}/100</span>
             </div>
           </div>
 
@@ -397,8 +448,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
               rows={4}
               className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400 resize-none transition-all duration-200 ${
                 validationErrors.content
-                  ? 'border-red-300 bg-red-50'
-                  : 'border-gray-300'
+                  ? "border-red-300 bg-red-50"
+                  : "border-gray-300"
               }`}
               placeholder="What's on your mind?"
               maxLength={MAX_CONTENT_LENGTH}
@@ -415,9 +466,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                   <span className="text-sm">Content looks good</span>
                 </div>
               ) : (
-                <span className="text-sm text-gray-500">Share your thoughts</span>
+                <span className="text-sm text-gray-500">
+                  Share your thoughts
+                </span>
               )}
-              <span className={`text-xs ${getCharacterCountColor(content.length, MAX_CONTENT_LENGTH)}`}>
+              <span
+                className={`text-xs ${getCharacterCountColor(content.length, MAX_CONTENT_LENGTH)}`}
+              >
                 {content.length}/{MAX_CONTENT_LENGTH}
               </span>
             </div>
@@ -428,7 +483,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Tags <span className="text-gray-400">(optional)</span>
             </label>
-            
+
             {/* Tag Display */}
             {tags.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-3">
@@ -458,11 +513,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
                 onChange={(e) => setTagInput(e.target.value)}
                 onKeyDown={handleTagInputKeyDown}
                 onFocus={() => setShowTagSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowTagSuggestions(false), 200)}
+                onBlur={() =>
+                  setTimeout(() => setShowTagSuggestions(false), 200)
+                }
                 className={`w-full px-4 py-3 border rounded-xl focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400 transition-all duration-200 ${
                   validationErrors.tags
-                    ? 'border-red-300 bg-red-50'
-                    : 'border-gray-300'
+                    ? "border-red-300 bg-red-50"
+                    : "border-gray-300"
                 }`}
                 placeholder="Add tags (press Enter or comma to add)"
                 maxLength={50}
@@ -523,11 +580,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpl
             </button>
             <button
               type="submit"
-              disabled={isLoading || Object.keys(validationErrors).some(key => validationErrors[key as keyof ValidationErrors])}
+              disabled={
+                isLoading ||
+                Object.keys(validationErrors).some(
+                  (key) => validationErrors[key as keyof ValidationErrors],
+                )
+              }
               className="px-6 py-3 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-xl hover:from-amber-500 hover:to-orange-600 transition-all transform hover:scale-105 flex items-center space-x-2 font-medium shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
               <Upload className="w-4 h-4" />
-              <span>{isLoading ? 'Publishing...' : 'Publish'}</span>
+              <span>{isLoading ? "Publishing..." : "Publish"}</span>
             </button>
           </div>
         </form>

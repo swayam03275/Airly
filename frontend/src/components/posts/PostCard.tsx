@@ -1,11 +1,30 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, Share2, MoreVertical, Eye, Bookmark, UserMinus, UserX, Flag, Pencil, Trash2 } from 'lucide-react';
-import toast from 'react-hot-toast';
-import { useNavigate } from 'react-router-dom';
-import { Post } from '../../types';
-import { tweetService } from '../../services/tweetService';
-import { useSelector } from 'react-redux';
-import { RootState } from '../../store';
+import {
+  Bookmark,
+  Eye,
+  Heart,
+  MessageCircle,
+  MoreVertical,
+  Pencil,
+  Share2,
+  Trash2,
+} from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import toast from "react-hot-toast";
+import { useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
+import {
+  isPostBookmarkedLocally,
+  setPostBookmarkedLocally,
+  subscribeToBookmarkState,
+} from "../../lib/bookmarkState";
+import {
+  isPostLikedLocally,
+  setPostLikedLocally,
+  subscribeToLikeState,
+} from "../../lib/likeState";
+import { tweetService } from "../../services/tweetService";
+import { RootState } from "../../store";
+import { Post } from "../../types";
 
 interface PostCardProps {
   post: Post;
@@ -15,48 +34,107 @@ interface PostCardProps {
   onTagClick?: (tag: string) => void;
 }
 
-export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onClick, onTagClick }) => {
+export const PostCard: React.FC<PostCardProps> = ({
+  post,
+  onEdit,
+  onDelete,
+  onClick,
+  onTagClick,
+}) => {
   const navigate = useNavigate();
   const cardRef = useRef<HTMLDivElement>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [isLiked, setIsLiked] = useState(post.isLiked || false);
-  const [likeCount, setLikeCount] = useState(post.likes || 0);
+  const postWithMetrics = post as Post & {
+    likesCount?: number;
+    likeCount?: number;
+    commentsCount?: number;
+    commentCount?: number;
+  };
+
+  const getLikeCountFromPost = () =>
+    Number(
+      postWithMetrics.likes ??
+        postWithMetrics.likesCount ??
+        postWithMetrics.likeCount ??
+        0,
+    );
+
+  const getCommentCountFromPost = () =>
+    Number(
+      postWithMetrics.comments ??
+        postWithMetrics.commentsCount ??
+        postWithMetrics.commentCount ??
+        0,
+    );
+
+  const [likeCount, setLikeCount] = useState(getLikeCountFromPost());
   const [isBookmarked, setIsBookmarked] = useState(post.isBookmarked || false);
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [isTogglingLike, setIsTogglingLike] = useState(false);
+  const postId = post._id || post.id;
 
   const currentUser = useSelector((state: RootState) => state.auth.user);
+
+  useEffect(() => {
+    const localLiked = isPostLikedLocally(postId);
+    const localBookmarked = isPostBookmarkedLocally(postId);
+    setIsLiked(localLiked || post.isLiked || false);
+    setLikeCount(getLikeCountFromPost());
+    setIsBookmarked(localBookmarked || post.isBookmarked || false);
+  }, [
+    postId,
+    post.isLiked,
+    post.likes,
+    postWithMetrics.likesCount,
+    postWithMetrics.likeCount,
+    post.isBookmarked,
+  ]);
+
+  useEffect(() => {
+    if (!postId) return;
+
+    return subscribeToLikeState(() => {
+      setIsLiked(isPostLikedLocally(postId));
+    });
+  }, [postId]);
+
+  useEffect(() => {
+    if (!postId) return;
+
+    return subscribeToBookmarkState(() => {
+      setIsBookmarked(isPostBookmarkedLocally(postId));
+    });
+  }, [postId]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (cardRef.current && !cardRef.current.contains(event.target as Node)) {
         setShowMenu(false);
-        setShowProfileMenu(false);
       }
     };
-    if (showMenu || showProfileMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
+    if (showMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
     }
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [showMenu, showProfileMenu]);
+  }, [showMenu]);
 
   const isOwner = currentUser && post.user && currentUser._id === post.user._id;
 
-  const imageUrl = post.media || post.imageUrl || '';
-  const title = post.title || '';
-  const content = post.content || post.description || '';
-  const userAvatar = post.user?.pfp || post.author?.avatar || '';
-  const userName = post.user?.fullName || post.author?.name || '';
-  const userHandle = post.user?.username || post.author?.email?.split('@')[0] || '';
+  const imageUrl = post.media || post.imageUrl || "";
+  const title = post.title || "";
+  const content = post.content || post.description || "";
+  const userAvatar = post.user?.pfp || post.author?.avatar || "";
+  const userName = post.user?.fullName || post.author?.name || "";
+  const userHandle =
+    post.user?.username || post.author?.email?.split("@")[0] || "";
   const views = post.views || 0;
-  const comments = post.comments || 0;
-  const postId = post._id || post.id;
+  const comments = getCommentCountFromPost();
 
   const handleCardClick = () => {
-    if (showMenu || showProfileMenu) {
+    if (showMenu) {
       setShowMenu(false);
-      setShowProfileMenu(false);
     } else if (onClick) {
       onClick();
     }
@@ -64,32 +142,48 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onCl
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (isTogglingLike) return;
     if (!postId) {
-      console.error('Post ID is missing');
+      console.error("Post ID is missing");
       return;
     }
+
+    const nextLiked = !isLiked;
+    const nextLikeCount = Math.max(0, likeCount + (nextLiked ? 1 : -1));
+    setIsLiked(nextLiked);
+    setLikeCount(nextLikeCount);
+    setIsTogglingLike(true);
+
     try {
       const response = await tweetService.toggleLike(postId);
       setIsLiked(response.data.liked);
       setLikeCount(response.data.likeCount);
+      setPostLikedLocally(postId, response.data.liked);
     } catch (error) {
-      console.error('Error toggling like:', error);
+      console.error("Error toggling like:", error);
+      setIsLiked(!nextLiked);
+      setLikeCount(likeCount);
+    } finally {
+      setIsTogglingLike(false);
     }
   };
 
   const handleBookmark = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!postId) {
-      console.error('Post ID is missing');
+      console.error("Post ID is missing");
       return;
     }
     try {
       const response = await tweetService.toggleBookmark(postId);
       setIsBookmarked(response.data.bookmarked);
-      toast.success(response.data.bookmarked ? 'Bookmarked!' : 'Bookmark removed');
+      setPostBookmarkedLocally(postId, response.data.bookmarked);
+      toast.success(
+        response.data.bookmarked ? "Bookmarked!" : "Bookmark removed",
+      );
     } catch (error) {
-      console.error('Error toggling bookmark:', error);
-      toast.error('Could not update bookmark.');
+      console.error("Error toggling bookmark:", error);
+      toast.error("Could not update bookmark.");
     }
   };
 
@@ -98,10 +192,10 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onCl
     const url = `${window.location.origin}/dashboard/post/${postId}`;
     try {
       await navigator.clipboard.writeText(url);
-      toast.success('Link copied!');
+      toast.success("Link copied!");
     } catch (error) {
-      console.error('Failed to copy link: ', error);
-      toast.error('Failed to copy link.');
+      console.error("Failed to copy link: ", error);
+      toast.error("Failed to copy link.");
     }
   };
 
@@ -112,30 +206,10 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onCl
     }
   };
 
-  const handleProfileMenuClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowProfileMenu(!showProfileMenu);
-  };
-
-  const handleUnfollow = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowProfileMenu(false);
-  };
-
-  const handleBlock = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowProfileMenu(false);
-  };
-
-  const handleReport = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowMenu(false);
-  };
-
   return (
-    <div 
+    <div
       ref={cardRef}
-      className={`bg-white/90 backdrop-blur-xl rounded-xl sm:rounded-2xl shadow-sm border border-gray-100/50 hover:shadow-xl transition-all duration-300 cursor-pointer group h-fit relative ${showMenu || showProfileMenu ? 'z-20' : 'z-0'}`}
+      className={`bg-white/90 backdrop-blur-xl rounded-xl sm:rounded-2xl shadow-sm border border-gray-100/50 hover:shadow-xl transition-all duration-300 cursor-pointer group h-fit relative ${showMenu ? "z-20" : "z-0"}`}
       onClick={handleCardClick}
     >
       {/* Post Image */}
@@ -147,7 +221,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onCl
           loading="lazy"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-        
+
         {/* Views Counter Overlay */}
         {views > 0 && (
           <div className="absolute top-2 sm:top-3 left-2 sm:left-3 bg-black/50 text-white px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs flex items-center space-x-1 backdrop-blur-sm">
@@ -168,39 +242,21 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onCl
               onClick={handleProfileClick}
             />
             <div>
-              <p className="font-medium text-gray-900 text-sm cursor-pointer hover:text-amber-600 transition-colors" onClick={handleProfileClick}>{userName}</p>
-              <p className="text-xs text-gray-500 cursor-pointer hover:text-amber-600 transition-colors" onClick={handleProfileClick}>@{userHandle}</p>
+              <p
+                className="font-medium text-gray-900 text-sm cursor-pointer hover:text-amber-600 transition-colors"
+                onClick={handleProfileClick}
+              >
+                {userName}
+              </p>
+              <p
+                className="text-xs text-gray-500 cursor-pointer hover:text-amber-600 transition-colors"
+                onClick={handleProfileClick}
+              >
+                @{userHandle}
+              </p>
             </div>
-            
-            {/* Three dot menu for profile actions */}
-            <button
-              onClick={handleProfileMenuClick}
-              className="p-1 hover:bg-gray-100 rounded-full transition-colors opacity-0 group-hover:opacity-100 duration-200 ml-2"
-            >
-              <MoreVertical className="w-3 h-3 text-gray-500" />
-            </button>
-
-            {/* Profile Menu */}
-            {showProfileMenu && (
-              <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-48 py-1">
-                <button
-                  onClick={handleUnfollow}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors flex items-center space-x-2 text-gray-700"
-                >
-                  <UserMinus className="w-4 h-4" />
-                  <span>Unfollow @{userHandle}</span>
-                </button>
-                <button
-                  onClick={handleBlock}
-                  className="w-full text-left px-4 py-2 hover:bg-red-50 transition-colors flex items-center space-x-2 text-red-600"
-                >
-                  <UserX className="w-4 h-4" />
-                  <span>Block @{userHandle}</span>
-                </button>
-              </div>
-            )}
           </div>
-          
+
           {/* Three Dot Menu */}
           <div className="relative">
             <button
@@ -220,15 +276,10 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onCl
                   onClick={handleBookmark}
                   className="w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors flex items-center space-x-2 text-gray-700"
                 >
-                  <Bookmark className={`w-4 h-4 ${isBookmarked ? 'fill-current text-amber-600' : ''}`} />
-                  <span>{isBookmarked ? 'Remove bookmark' : 'Bookmark'}</span>
-                </button>
-                <button
-                  onClick={handleReport}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors flex items-center space-x-2 text-gray-700"
-                >
-                  <Flag className="w-4 h-4" />
-                  <span>Report post</span>
+                  <Bookmark
+                    className={`w-4 h-4 ${isBookmarked ? "fill-current text-amber-600" : ""}`}
+                  />
+                  <span>{isBookmarked ? "Remove bookmark" : "Bookmark"}</span>
                 </button>
                 {isOwner && (
                   <>
@@ -263,11 +314,15 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onCl
         </div>
 
         {title && (
-          <h3 className="font-semibold text-gray-900 mb-2 text-sm leading-tight line-clamp-2">{title}</h3>
+          <h3 className="font-semibold text-gray-900 mb-2 text-sm leading-tight line-clamp-2">
+            {title}
+          </h3>
         )}
-        
+
         {content && (
-          <p className="text-gray-600 text-xs mb-3 line-clamp-3 leading-relaxed">{content}</p>
+          <p className="text-gray-600 text-xs mb-3 line-clamp-3 leading-relaxed">
+            {content}
+          </p>
         )}
 
         {/* Tags */}
@@ -296,14 +351,17 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onCl
         {/* Post Actions */}
         <div className="flex items-center justify-between text-gray-500">
           <div className="flex items-center space-x-4">
-            <button 
+            <button
               onClick={handleLike}
-              className={`flex items-center space-x-1 hover:text-red-500 transition-colors text-xs group ${isLiked ? 'text-red-500' : ''}`}
+              disabled={isTogglingLike}
+              className={`flex items-center space-x-1 hover:text-red-500 transition-colors text-xs group ${isLiked ? "text-red-500" : ""}`}
             >
-              <Heart className={`w-4 h-4 transition-transform group-hover:scale-110 ${isLiked ? 'fill-current' : ''}`} />
+              <Heart
+                className={`w-4 h-4 transition-transform group-hover:scale-110 ${isLiked ? "fill-current" : ""}`}
+              />
               <span>{likeCount.toLocaleString()}</span>
             </button>
-            <button 
+            <button
               onClick={(e) => e.stopPropagation()}
               className="flex items-center space-x-1 hover:text-blue-500 transition-colors text-xs group"
             >
@@ -318,13 +376,15 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onEdit, onDelete, onCl
             )}
           </div>
           <div className="flex items-center space-x-2">
-            <button 
+            <button
               onClick={handleBookmark}
-              className={`hover:text-amber-500 transition-colors group ${isBookmarked ? 'text-amber-500' : ''}`}
+              className={`hover:text-amber-500 transition-colors group ${isBookmarked ? "text-amber-500" : ""}`}
             >
-              <Bookmark className={`w-4 h-4 transition-transform group-hover:scale-110 ${isBookmarked ? 'fill-current' : ''}`} />
+              <Bookmark
+                className={`w-4 h-4 transition-transform group-hover:scale-110 ${isBookmarked ? "fill-current" : ""}`}
+              />
             </button>
-            <button 
+            <button
               onClick={handleShareClick}
               className="hover:text-green-500 transition-colors group"
             >

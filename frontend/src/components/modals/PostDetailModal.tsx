@@ -1,10 +1,33 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { X, Heart, MessageCircle, Share, Bookmark, MoreHorizontal, ArrowLeft, ArrowRight, Eye, Link, Flag, UserMinus, UserX, Pencil, Trash2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { Post } from '../../types';
-import { tweetService } from '../../services/tweetService';
-import { useSelector } from 'react-redux';
-import { RootState } from '../../store';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Bookmark,
+  Eye,
+  Heart,
+  Link,
+  MessageCircle,
+  MoreHorizontal,
+  Pencil,
+  Share,
+  Trash2,
+  X,
+} from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useSelector } from "react-redux";
+import { useNavigate } from "react-router-dom";
+import {
+  isPostBookmarkedLocally,
+  setPostBookmarkedLocally,
+  subscribeToBookmarkState,
+} from "../../lib/bookmarkState";
+import {
+  isPostLikedLocally,
+  setPostLikedLocally,
+  subscribeToLikeState,
+} from "../../lib/likeState";
+import { tweetService } from "../../services/tweetService";
+import { RootState } from "../../store";
+import { Post } from "../../types";
 
 interface PostDetailModalProps {
   post: Post;
@@ -28,7 +51,7 @@ interface Comment {
     pfp: string;
   };
   likes: number;
-  likedBy: any[];
+  likedBy: unknown[];
   replyCount: number;
   createdAt: string;
   edited?: boolean;
@@ -44,80 +67,243 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
   hasNext,
   onPostUpdate,
   onEdit,
-  onDelete
+  onDelete,
 }) => {
   const navigate = useNavigate();
+  const postWithMetrics = post as Post & {
+    likesCount?: number;
+    likeCount?: number;
+    commentsCount?: number;
+    commentCount?: number;
+  };
+
+  const resolvedLikeCount = Number(
+    postWithMetrics.likes ??
+      postWithMetrics.likesCount ??
+      postWithMetrics.likeCount ??
+      0,
+  );
+
+  const resolvedCommentCount = Number(
+    postWithMetrics.comments ??
+      postWithMetrics.commentsCount ??
+      postWithMetrics.commentCount ??
+      0,
+  );
+
   const [isLiked, setIsLiked] = useState(post.isLiked || false);
-  const [likeCount, setLikeCount] = useState(post.likes || 0);
+  const [likeCount, setLikeCount] = useState(resolvedLikeCount);
   const [isBookmarked, setIsBookmarked] = useState(post.isBookmarked || false);
+  const [isTogglingLike, setIsTogglingLike] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [newComment, setNewComment] = useState('');
+  const [newComment, setNewComment] = useState("");
   const [comments, setComments] = useState<Comment[]>([]);
   const [isLoadingComments, setIsLoadingComments] = useState(false);
-  const [commentCount, setCommentCount] = useState(post.comments || 0);
-  const modalRef = useRef<HTMLDivElement>(null);
+  const [isLoadingMoreComments, setIsLoadingMoreComments] = useState(false);
+  const [commentsCursor, setCommentsCursor] = useState<string | undefined>(
+    undefined,
+  );
+  const [hasMoreComments, setHasMoreComments] = useState(false);
+  const [commentCount, setCommentCount] = useState(resolvedCommentCount);
+  const commentsContainerRef = useRef<HTMLDivElement | null>(null);
+  const commentsSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  const COMMENTS_BATCH = 3;
 
   const currentUser = useSelector((state: RootState) => state.auth.user);
   const isOwner = currentUser && post.user && currentUser._id === post.user._id;
 
-  const userHandle = post.user?.username || post.author?.name?.toLowerCase().replace(/\s+/g, '') || 'user';
+  const userHandle =
+    post.user?.username ||
+    post.author?.name?.toLowerCase().replace(/\s+/g, "") ||
+    "user";
   const postId = post._id || post.id;
 
   useEffect(() => {
-    if (postId) {
-      fetchComments();
-    }
+    const localLiked = isPostLikedLocally(postId);
+    const localBookmarked = isPostBookmarkedLocally(postId);
+    setIsLiked(localLiked || post.isLiked || false);
+    setLikeCount(resolvedLikeCount);
+    setIsBookmarked(localBookmarked || post.isBookmarked || false);
+    setCommentCount(resolvedCommentCount);
+  }, [
+    postId,
+    post._id,
+    post.id,
+    post.isLiked,
+    post.likes,
+    postWithMetrics.likesCount,
+    postWithMetrics.likeCount,
+    post.isBookmarked,
+    post.comments,
+    postWithMetrics.commentsCount,
+    postWithMetrics.commentCount,
+    resolvedLikeCount,
+    resolvedCommentCount,
+  ]);
+
+  useEffect(() => {
+    if (!postId) return;
+
+    return subscribeToLikeState(() => {
+      setIsLiked(isPostLikedLocally(postId));
+    });
   }, [postId]);
 
-  const fetchComments = async () => {
+  useEffect(() => {
     if (!postId) return;
-    
+
+    return subscribeToBookmarkState(() => {
+      setIsBookmarked(isPostBookmarkedLocally(postId));
+    });
+  }, [postId]);
+
+  useEffect(() => {
+    const syncPostReactions = async () => {
+      if (!postId) return;
+
+      try {
+        const [likedResponse, likeCountResponse, bookmarkedResponse] =
+          await Promise.all([
+            tweetService.checkUserLiked(postId),
+            tweetService.getLikeCount(postId),
+            tweetService.checkUserBookmarked(postId),
+          ]);
+
+        setIsLiked(Boolean(likedResponse.data?.liked));
+        setLikeCount(Number(likeCountResponse.data?.likeCount ?? 0));
+        setPostLikedLocally(postId, Boolean(likedResponse.data?.liked));
+        setIsBookmarked(Boolean(bookmarkedResponse.data?.bookmarked));
+        setPostBookmarkedLocally(
+          postId,
+          Boolean(bookmarkedResponse.data?.bookmarked),
+        );
+      } catch (error) {
+        console.error("Failed to sync post reactions:", error);
+      }
+    };
+
+    syncPostReactions();
+  }, [postId]);
+
+  const fetchInitialComments = useCallback(async () => {
+    if (!postId) return;
+
     try {
       setIsLoadingComments(true);
-      
+
       const [commentsResponse, countResponse] = await Promise.all([
-        tweetService.getComments(postId),
-        tweetService.getCommentCount(postId)
+        tweetService.getComments(postId, undefined, COMMENTS_BATCH),
+        tweetService.getCommentCount(postId),
       ]);
-      
-      setComments(commentsResponse.data.comments || []);
+
+      const fetchedComments = commentsResponse.data.comments || [];
+      setComments(fetchedComments);
+      setHasMoreComments(Boolean(commentsResponse.data.hasMore));
+      setCommentsCursor(commentsResponse.data.nextCursor);
+
       const actualCommentCount = countResponse.data.count;
       setCommentCount(actualCommentCount);
-      
+
       if (onPostUpdate && actualCommentCount !== post.comments) {
         onPostUpdate({
           ...post,
-          comments: actualCommentCount
+          comments: actualCommentCount,
         });
       }
     } catch (error) {
-      console.error('Failed to fetch comments:', error);
+      console.error("Failed to fetch comments:", error);
       setComments([]);
     } finally {
       setIsLoadingComments(false);
     }
-  };
+  }, [COMMENTS_BATCH, onPostUpdate, post, postId]);
+
+  const fetchMoreComments = useCallback(async () => {
+    if (!postId || !hasMoreComments || isLoadingMoreComments) return;
+
+    try {
+      setIsLoadingMoreComments(true);
+
+      const commentsResponse = await tweetService.getComments(
+        postId,
+        commentsCursor,
+        COMMENTS_BATCH,
+      );
+
+      const fetchedComments = commentsResponse.data.comments || [];
+      setComments((prev) => [...prev, ...fetchedComments]);
+      setHasMoreComments(Boolean(commentsResponse.data.hasMore));
+      setCommentsCursor(commentsResponse.data.nextCursor);
+    } catch (error) {
+      console.error("Failed to load more comments:", error);
+    } finally {
+      setIsLoadingMoreComments(false);
+    }
+  }, [
+    COMMENTS_BATCH,
+    commentsCursor,
+    hasMoreComments,
+    isLoadingMoreComments,
+    postId,
+  ]);
+
+  useEffect(() => {
+    if (postId) {
+      fetchInitialComments();
+    }
+  }, [fetchInitialComments, postId]);
+
+  const handleLoadMoreComments = useCallback(() => {
+    if (!hasMoreComments || isLoadingMoreComments) return;
+    fetchMoreComments();
+  }, [fetchMoreComments, hasMoreComments, isLoadingMoreComments]);
+
+  useEffect(() => {
+    const root = commentsContainerRef.current;
+    const target = commentsSentinelRef.current;
+
+    if (!root || !target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry.isIntersecting) {
+          handleLoadMoreComments();
+        }
+      },
+      {
+        root,
+        threshold: 0.1,
+      },
+    );
+
+    observer.observe(target);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [comments.length, handleLoadMoreComments]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === "Escape") {
         onClose();
-      } else if (event.key === 'ArrowLeft' && hasPrevious && onPrevious) {
+      } else if (event.key === "ArrowLeft" && hasPrevious && onPrevious) {
         onPrevious();
-      } else if (event.key === 'ArrowRight' && hasNext && onNext) {
+      } else if (event.key === "ArrowRight" && hasNext && onNext) {
         onNext();
       }
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose, onPrevious, onNext, hasPrevious, hasNext]);
 
   useEffect(() => {
-    document.body.style.overflow = 'hidden';
+    document.body.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = "unset";
     };
   }, []);
 
@@ -136,45 +322,59 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
 
   const handleLike = async () => {
     const postId = post._id || post.id;
+    if (isTogglingLike) return;
     if (!postId) {
-      console.error('Post ID is missing');
+      console.error("Post ID is missing");
       return;
     }
+
+    const nextLiked = !isLiked;
+    const nextLikeCount = Math.max(0, likeCount + (nextLiked ? 1 : -1));
+
+    setIsLiked(nextLiked);
+    setLikeCount(nextLikeCount);
+    setIsTogglingLike(true);
     try {
       const response = await tweetService.toggleLike(postId);
       setIsLiked(response.data.liked);
       setLikeCount(response.data.likeCount);
-      
+      setPostLikedLocally(postId, response.data.liked);
+
       if (onPostUpdate) {
         onPostUpdate({
           ...post,
           likes: response.data.likeCount,
-          isLiked: response.data.liked
+          isLiked: response.data.liked,
         });
       }
     } catch (error) {
-      console.error('Failed to toggle like:', error);
+      console.error("Failed to toggle like:", error);
+      setIsLiked(!nextLiked);
+      setLikeCount(likeCount);
+    } finally {
+      setIsTogglingLike(false);
     }
   };
 
   const handleBookmark = async () => {
     const postId = post._id || post.id;
     if (!postId) {
-      console.error('Post ID is missing');
+      console.error("Post ID is missing");
       return;
     }
     try {
       const response = await tweetService.toggleBookmark(postId);
       setIsBookmarked(response.data.bookmarked);
-      
+      setPostBookmarkedLocally(postId, response.data.bookmarked);
+
       if (onPostUpdate) {
         onPostUpdate({
           ...post,
-          isBookmarked: response.data.bookmarked
+          isBookmarked: response.data.bookmarked,
         });
       }
     } catch (error) {
-      console.error('Failed to toggle bookmark:', error);
+      console.error("Failed to toggle bookmark:", error);
     }
   };
 
@@ -184,7 +384,7 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
       await navigator.clipboard.writeText(url);
       setShowMenu(false);
     } catch (error) {
-      console.error('Error copying link:', error);
+      console.error("Error copying link:", error);
     }
   };
 
@@ -201,20 +401,8 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
         await navigator.clipboard.writeText(url);
       }
     } catch (error) {
-      console.error('Error sharing:', error);
+      console.error("Error sharing:", error);
     }
-  };
-
-  const handleUnfollow = () => {
-    setShowProfileMenu(false);
-  };
-
-  const handleBlock = () => {
-    setShowProfileMenu(false);
-  };
-
-  const handleReport = () => {
-    setShowMenu(false);
   };
 
   const handleCommentSubmit = async (e: React.FormEvent) => {
@@ -222,54 +410,56 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
     if (newComment.trim()) {
       const postId = post._id || post.id;
       if (!postId) {
-        console.error('Post ID not found');
+        console.error("Post ID not found");
         return;
       }
-      
+
       try {
-        const response = await tweetService.createComment(postId, newComment.trim());
-        setNewComment('');
-        
+        const response = await tweetService.createComment(
+          postId,
+          newComment.trim(),
+        );
+        setNewComment("");
+
         if (response.data) {
-          setComments(prev => [response.data, ...prev]);
+          setComments((prev) => [response.data, ...prev]);
+          setCommentCount((prev) => prev + 1);
           try {
             const countResponse = await tweetService.getCommentCount(postId);
             const actualCommentCount = countResponse.data.count;
             setCommentCount(actualCommentCount);
-            
+
             if (onPostUpdate) {
               onPostUpdate({
                 ...post,
-                comments: actualCommentCount
+                comments: actualCommentCount,
               });
             }
           } catch (countError) {
-            console.error('Failed to fetch updated comment count:', countError);
+            console.error("Failed to fetch updated comment count:", countError);
             const newCommentCount = commentCount + 1;
             setCommentCount(newCommentCount);
-            
+
             if (onPostUpdate) {
               onPostUpdate({
                 ...post,
-                comments: newCommentCount
+                comments: newCommentCount,
               });
             }
           }
         }
-        
-      } catch (error: any) {
-        console.error('Failed to post comment:', error);
+      } catch (error: unknown) {
+        console.error("Failed to post comment:", error);
       }
     }
   };
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
       onClick={handleBackdropClick}
     >
-      <div className="relative max-w-6xl w-full max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex">
-        
+      <div className="relative max-w-6xl w-full max-h-[92vh] bg-white rounded-3xl shadow-2xl overflow-hidden flex border border-white/40">
         {/* Close Button */}
         <button
           onClick={onClose}
@@ -291,8 +481,8 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
               </button>
             )}
             {/* Empty div for spacing */}
-            {!hasPrevious && <div />} 
-            
+            {!hasPrevious && <div />}
+
             {hasNext && onNext && (
               <button
                 onClick={onNext}
@@ -302,9 +492,9 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
               </button>
             )}
           </div>
-          
+
           <div className="absolute inset-0 flex items-center justify-center">
-            {post.mediaType === 'video' ? (
+            {post.mediaType === "video" ? (
               <video
                 src={post.mediaUrl || post.media || post.imageUrl}
                 controls
@@ -320,7 +510,7 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
               />
             )}
           </div>
-          
+
           {/* Views Counter Overlay */}
           {post.views && post.views > 0 && (
             <div className="absolute top-4 left-4 bg-black/50 text-white px-3 py-1 rounded-lg text-sm flex items-center space-x-2 backdrop-blur-sm">
@@ -331,47 +521,32 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
         </div>
 
         {/* Details Section */}
-        <div className="w-96 flex flex-col">
+        <div className="w-[440px] max-w-[45vw] flex flex-col border-l border-gray-100 bg-white">
           {/* Header */}
           <div className="p-4 border-b border-gray-100">
             <div className="flex items-center space-x-3">
               <div className="flex items-center space-x-3 flex-1 relative">
-                <button onClick={handleUserClick} className="flex items-center space-x-3 hover:bg-gray-50 rounded-lg p-2 -m-2 transition-colors duration-200">
+                <button
+                  onClick={handleUserClick}
+                  className="flex items-center space-x-3 hover:bg-gray-50 rounded-lg p-2 -m-2 transition-colors duration-200"
+                >
                   <img
                     src={post.user?.pfp || post.author?.avatar}
                     alt={post.user?.fullName || post.author?.name}
                     className="w-10 h-10 rounded-full object-cover"
                   />
                   <div className="text-left">
-                    <p className="font-semibold text-gray-900">{post.user?.fullName || post.author?.name}</p>
+                    <p className="font-semibold text-gray-900">
+                      {post.user?.fullName || post.author?.name}
+                    </p>
                     <p className="text-sm text-gray-500">@{userHandle}</p>
                   </div>
                 </button>
-
-                {/* Profile Menu */}
-                {showProfileMenu && (
-                  <div className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-48 py-1">
-                    <button
-                      onClick={handleUnfollow}
-                      className="w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors flex items-center space-x-2 text-gray-700"
-                    >
-                      <UserMinus className="w-4 h-4" />
-                      <span>Unfollow @{userHandle}</span>
-                    </button>
-                    <button
-                      onClick={handleBlock}
-                      className="w-full text-left px-4 py-2 hover:bg-red-50 transition-colors flex items-center space-x-2 text-red-600"
-                    >
-                      <UserX className="w-4 h-4" />
-                      <span>Block @{userHandle}</span>
-                    </button>
-                  </div>
-                )}
               </div>
-              
+
               {/* Three Dot Menu */}
               <div className="relative">
-                <button 
+                <button
                   onClick={() => setShowMenu(!showMenu)}
                   className="p-2 hover:bg-gray-100 rounded-full transition-colors duration-200"
                 >
@@ -392,15 +567,12 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
                       onClick={handleBookmark}
                       className="w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors flex items-center space-x-2 text-gray-700"
                     >
-                      <Bookmark className={`w-4 h-4 ${isBookmarked ? 'fill-current text-amber-600' : ''}`} />
-                      <span>{isBookmarked ? 'Remove bookmark' : 'Bookmark'}</span>
-                    </button>
-                    <button
-                      onClick={handleReport}
-                      className="w-full text-left px-4 py-2 hover:bg-red-50 transition-colors flex items-center space-x-2 text-red-600"
-                    >
-                      <Flag className="w-4 h-4" />
-                      <span>Report post</span>
+                      <Bookmark
+                        className={`w-4 h-4 ${isBookmarked ? "fill-current text-amber-600" : ""}`}
+                      />
+                      <span>
+                        {isBookmarked ? "Remove bookmark" : "Bookmark"}
+                      </span>
                     </button>
                     {isOwner && (
                       <>
@@ -434,11 +606,15 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto bg-gray-50/40">
             <div className="p-4">
-              <h2 className="text-xl font-bold text-gray-900 mb-2">{post.title}</h2>
-              <p className="text-gray-700 leading-relaxed mb-4">{post.content || post.description}</p>
-              
+              <h2 className="text-xl font-bold text-gray-900 mb-2">
+                {post.title}
+              </h2>
+              <p className="text-gray-700 leading-relaxed mb-4">
+                {post.content || post.description}
+              </p>
+
               {/* Tags */}
               {post.tags && post.tags.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-4">
@@ -469,15 +645,20 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
             </div>
 
             {/* Comments Section */}
-            <div className="border-t border-gray-100 p-4">
-              <h3 className="font-semibold text-gray-900 mb-3">Comments ({commentCount})</h3>
-              
-              {isLoadingComments ? (
+            <div className="border-t border-gray-100 p-4 bg-white">
+              <h3 className="font-semibold text-gray-900 mb-3">
+                Comments ({commentCount})
+              </h3>
+
+              {isLoadingComments && comments.length === 0 ? (
                 <div className="flex justify-center py-8">
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-500"></div>
                 </div>
               ) : comments.length > 0 ? (
-                <div className="space-y-4 max-h-64 overflow-y-auto">
+                <div
+                  ref={commentsContainerRef}
+                  className="space-y-3 max-h-72 overflow-y-auto pr-1"
+                >
                   {comments.map((comment) => (
                     <div key={comment._id} className="flex space-x-3">
                       <img
@@ -488,32 +669,38 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
                       <div className="flex-1 min-w-0">
                         <div className="bg-gray-50 rounded-lg px-3 py-2">
                           <div className="flex items-center space-x-2 mb-1">
-                            <span className="font-medium text-sm text-gray-900">{comment.user.fullName}</span>
-                            <span className="text-xs text-gray-500">@{comment.user.username}</span>
+                            <span className="font-medium text-sm text-gray-900">
+                              {comment.user.fullName}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              @{comment.user.username}
+                            </span>
                             <span className="text-xs text-gray-500">•</span>
                             <span className="text-xs text-gray-500">
                               {new Date(comment.createdAt).toLocaleDateString()}
                             </span>
                           </div>
-                          <p className="text-sm text-gray-700 leading-relaxed">{comment.content}</p>
+                          <p className="text-sm text-gray-700 leading-relaxed">
+                            {comment.content}
+                          </p>
                         </div>
-                        
-                        {/* Comment actions */}
-                        <div className="flex items-center space-x-4 mt-1 text-xs">
-                          <button className="text-gray-500 hover:text-red-500 flex items-center space-x-1">
-                            <Heart className="w-3 h-3" />
-                            <span>{comment.likes || 0}</span>
-                          </button>
-                          <button className="text-gray-500 hover:text-blue-500">
-                            Reply
-                          </button>
-                          {comment.edited && (
-                            <span className="text-gray-400 italic">edited</span>
-                          )}
-                        </div>
+
+                        {comment.edited && (
+                          <div className="mt-1 text-xs text-gray-400 italic">
+                            edited
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
+
+                  {isLoadingMoreComments && (
+                    <div className="py-2 text-center text-xs text-gray-500">
+                      Loading more comments...
+                    </div>
+                  )}
+
+                  <div ref={commentsSentinelRef} className="h-1" />
                 </div>
               ) : (
                 <div className="text-center text-gray-500 py-8">
@@ -528,26 +715,35 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
           <div className="border-t border-gray-100 p-4">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-1">
-                <button 
+                <button
                   onClick={handleLike}
-                  className={`flex items-center space-x-1 px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors duration-200 ${isLiked ? 'text-red-500' : ''}`}
+                  disabled={isTogglingLike}
+                  className={`flex items-center space-x-1 px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors duration-200 ${isLiked ? "text-red-500" : ""}`}
                 >
-                  <Heart className={`w-5 h-5 ${isLiked ? 'fill-current text-red-500' : 'text-gray-600'}`} />
-                  <span className="text-sm font-medium text-gray-700">{likeCount.toLocaleString()}</span>
+                  <Heart
+                    className={`w-5 h-5 ${isLiked ? "fill-current text-red-500" : "text-gray-600"}`}
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    {likeCount.toLocaleString()}
+                  </span>
                 </button>
                 <button className="flex items-center space-x-1 px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors duration-200">
                   <MessageCircle className="w-5 h-5 text-gray-600" />
-                  <span className="text-sm font-medium text-gray-700">{commentCount}</span>
+                  <span className="text-sm font-medium text-gray-700">
+                    {commentCount}
+                  </span>
                 </button>
               </div>
               <div className="flex items-center space-x-2">
-                <button 
+                <button
                   onClick={handleBookmark}
-                  className={`p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200 ${isBookmarked ? 'text-amber-500' : ''}`}
+                  className={`p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200 ${isBookmarked ? "text-amber-500" : ""}`}
                 >
-                  <Bookmark className={`w-5 h-5 ${isBookmarked ? 'fill-current text-amber-500' : 'text-gray-600'}`} />
+                  <Bookmark
+                    className={`w-5 h-5 ${isBookmarked ? "fill-current text-amber-500" : "text-gray-600"}`}
+                  />
                 </button>
-                <button 
+                <button
                   onClick={handleShare}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
                 >
@@ -555,7 +751,7 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
                 </button>
               </div>
             </div>
-            
+
             {/* Comment Input */}
             <form onSubmit={handleCommentSubmit} className="flex space-x-2">
               <input
@@ -566,7 +762,7 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
                 className="flex-1 px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent transition-all duration-200"
                 maxLength={280}
               />
-              <button 
+              <button
                 type="submit"
                 disabled={!newComment.trim()}
                 className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 font-medium"
@@ -579,15 +775,14 @@ export const PostDetailModal: React.FC<PostDetailModalProps> = ({
       </div>
 
       {/* Click outside to close menus */}
-      {(showMenu || showProfileMenu) && (
-        <div 
-          className="fixed inset-0 z-10" 
+      {showMenu && (
+        <div
+          className="fixed inset-0 z-10"
           onClick={() => {
             setShowMenu(false);
-            setShowProfileMenu(false);
           }}
         />
       )}
     </div>
   );
-}; 
+};

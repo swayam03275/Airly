@@ -1,16 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { Edit, MapPin, Calendar, Award, Heart, MoreHorizontal, UserX, Flag } from 'lucide-react';
-import { useSelector } from 'react-redux';
-import { useParams, useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import { RootState } from '../../store';
-import { PostGrid } from '../posts/PostGrid';
-import { userService } from '../../services/userService';
-import { tweetService } from '../../services/tweetService';
-import { Post } from '../../types';
-import { EditPostModal } from '../modals/EditPostModal';
-import { ConfirmDeleteModal } from '../modals/ConfirmDeleteModal';
-import EditProfileModal from '../modals/EditProfileModal';
+import { Award, Calendar, Edit, Heart, MapPin } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import toast from "react-hot-toast";
+import { useSelector } from "react-redux";
+import { useNavigate, useParams } from "react-router-dom";
+import { applyLocalLikedState, seedLikedPosts } from "../../lib/likeState";
+import { tweetService } from "../../services/tweetService";
+import { userService } from "../../services/userService";
+import { RootState } from "../../store";
+import { Post } from "../../types";
+import { ConfirmDeleteModal } from "../modals/ConfirmDeleteModal";
+import { EditPostModal } from "../modals/EditPostModal";
+import EditProfileModal from "../modals/EditProfileModal";
+import { PostGrid } from "../posts/PostGrid";
 
 interface UserProfile {
   _id: string;
@@ -33,16 +34,14 @@ export const ProfilePage: React.FC = () => {
   const { user: currentUser } = useSelector((state: RootState) => state.auth);
   const { username } = useParams<{ username?: string }>();
   const navigate = useNavigate();
-  
+
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [userPosts, setUserPosts] = useState<Post[]>([]);
   const [likedPosts, setLikedPosts] = useState<Post[]>([]);
-  const [activeTab, setActiveTab] = useState('posts');
+  const [activeTab, setActiveTab] = useState("posts");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showMenu, setShowMenu] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
-  const [isBlocked, setIsBlocked] = useState(false);
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
 
   const [editingPost, setEditingPost] = useState<Post | null>(null);
@@ -57,17 +56,6 @@ export const ProfilePage: React.FC = () => {
     }
   }, [profileUsername]);
 
-  useEffect(() => {
-    const handleClickOutside = () => {
-      if (showMenu) {
-        setShowMenu(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showMenu]);
-
   const fetchProfile = async () => {
     try {
       setIsLoading(true);
@@ -76,17 +64,17 @@ export const ProfilePage: React.FC = () => {
       const profileData = await userService.getUserProfile(profileUsername!);
       setProfile(profileData);
       setIsFollowing(profileData.relationshipStatus.isFollowing);
-      setIsBlocked(profileData.relationshipStatus.isBlocked);
+
+      const likedData = await preloadLikedState();
 
       await fetchUserPosts();
 
       if (profileData.relationshipStatus.isOwnProfile) {
-        await fetchLikedPosts();
+        setLikedPosts(likedData);
       }
-
     } catch (error: any) {
-      console.error('Error fetching profile:', error);
-      setError(error.response?.data?.message || 'Failed to load profile');
+      console.error("Error fetching profile:", error);
+      setError(error.response?.data?.message || "Failed to load profile");
     } finally {
       setIsLoading(false);
     }
@@ -95,20 +83,33 @@ export const ProfilePage: React.FC = () => {
   const fetchUserPosts = async () => {
     try {
       const postsData = await userService.getUserPosts(profileUsername!);
-      setUserPosts(postsData.posts || []);
+      setUserPosts(applyLocalLikedState(postsData.posts || []));
     } catch (error) {
-      console.error('Error fetching user posts:', error);
+      console.error("Error fetching user posts:", error);
       setUserPosts([]);
     }
   };
-  
-  const fetchLikedPosts = async () => {
+
+  const preloadLikedState = async (): Promise<Post[]> => {
     try {
       const likedData = await tweetService.getUserLikedTweets();
-      setLikedPosts(likedData.data.tweets || []);
+      const normalizedLikedPosts = (likedData.data.tweets || []).map(
+        (post) => ({
+          ...post,
+          isLiked: true,
+        }),
+      );
+
+      const likedIds = normalizedLikedPosts
+        .map((post) => post._id)
+        .filter((id): id is string => Boolean(id));
+
+      seedLikedPosts(likedIds);
+
+      return normalizedLikedPosts;
     } catch (error) {
-      console.error('Error fetching liked posts:', error);
-      setLikedPosts([]);
+      console.error("Error preloading liked state:", error);
+      return [];
     }
   };
 
@@ -128,65 +129,45 @@ export const ProfilePage: React.FC = () => {
       await tweetService.deleteTweet(deletingPost._id!);
       setDeletingPost(null);
       await fetchUserPosts();
-      toast.success('Post deleted successfully');
+      toast.success("Post deleted successfully");
     } catch (err) {
-      console.error('Failed to delete post:', err);
-      toast.error('Failed to delete post. Please try again.');
+      console.error("Failed to delete post:", err);
+      toast.error("Failed to delete post. Please try again.");
     } finally {
       setIsSubmittingDelete(false);
     }
   };
-  
+
   const handlePostClick = (post: Post) => {
     navigate(`/dashboard/post/${post._id}`);
   };
 
   const handleFollow = async () => {
     if (!profile) return;
-    
+
     try {
       const response = await userService.toggleFollow(profile._id);
       setIsFollowing(response.isFollowing);
-      toast.success(response.isFollowing ? `Followed @${profile.username}` : `Unfollowed @${profile.username}`);
-      
-      setProfile(prev => prev ? {
-        ...prev,
-        followerCount: response.isFollowing 
-          ? prev.followerCount + 1 
-          : prev.followerCount - 1
-      } : null);
-      
-    } catch (error) {
-      console.error('Error toggling follow:', error);
-      toast.error('Something went wrong.');
-    }
-  };
+      toast.success(
+        response.isFollowing
+          ? `Followed @${profile.username}`
+          : `Unfollowed @${profile.username}`,
+      );
 
-  const handleBlock = async () => {
-    if (!profile) return;
-    
-    try {
-      const response = await userService.toggleBlock(profile._id);
-      setIsBlocked(response.isBlocked || false);
-      toast.success(response.isBlocked ? `Blocked @${profile.username}` : `Unblocked @${profile.username}`);
-      
-      if (response.isBlocked) {
-        setIsFollowing(false);
-        setProfile(prev => prev ? {
-          ...prev,
-          followerCount: Math.max(0, prev.followerCount - 1)
-        } : null);
-      }
-      
-      setShowMenu(false);
+      setProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              followerCount: response.isFollowing
+                ? prev.followerCount + 1
+                : prev.followerCount - 1,
+            }
+          : null,
+      );
     } catch (error) {
-      console.error('Error toggling block:', error);
-      toast.error('Something went wrong.');
+      console.error("Error toggling follow:", error);
+      toast.error("Something went wrong.");
     }
-  };
-
-  const handleReport = () => {
-    setShowMenu(false);
   };
 
   const handleTagClick = (tag: string) => {
@@ -194,7 +175,7 @@ export const ProfilePage: React.FC = () => {
   };
 
   const handleProfileUpdate = (updatedUser: Partial<UserProfile>) => {
-    setProfile(prevProfile => {
+    setProfile((prevProfile) => {
       if (!prevProfile) return null;
       return {
         ...prevProfile,
@@ -205,14 +186,14 @@ export const ProfilePage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="max-w-4xl mx-auto p-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 mb-6">
+      <div className="max-w-4xl mx-auto px-4 py-4 sm:p-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-8 mb-6">
           <div className="animate-pulse">
-            <div className="flex items-start space-x-6">
-              <div className="w-32 h-32 bg-gray-200 rounded-full"></div>
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
+              <div className="w-24 h-24 sm:w-32 sm:h-32 bg-gray-200 rounded-full"></div>
               <div className="flex-1">
-                <div className="h-8 bg-gray-200 rounded w-1/3 mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
+                <div className="h-8 bg-gray-200 rounded w-2/3 sm:w-1/3 mb-2"></div>
+                <div className="h-4 bg-gray-200 rounded w-1/2 sm:w-1/4 mb-4"></div>
                 <div className="h-4 bg-gray-200 rounded w-full mb-2"></div>
                 <div className="h-4 bg-gray-200 rounded w-2/3"></div>
               </div>
@@ -225,12 +206,16 @@ export const ProfilePage: React.FC = () => {
 
   if (error || !profile) {
     return (
-      <div className="max-w-4xl mx-auto p-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">Profile Not Found</h2>
-          <p className="text-gray-600 mb-4">{error || 'The user you are looking for does not exist.'}</p>
+      <div className="max-w-4xl mx-auto px-4 py-4 sm:p-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-8 text-center">
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">
+            Profile Not Found
+          </h2>
+          <p className="text-gray-600 mb-4">
+            {error || "The user you are looking for does not exist."}
+          </p>
           <button
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate("/dashboard")}
             className="px-6 py-3 bg-amber-500 text-white rounded-xl font-medium hover:bg-amber-600 transition-colors"
           >
             Go Back to Dashboard
@@ -240,11 +225,17 @@ export const ProfilePage: React.FC = () => {
     );
   }
 
-  const { relationshipStatus: relStatus, followerCount, followingCount } = profile;
+  const { relationshipStatus: relStatus } = profile;
   const { isOwnProfile } = relStatus || {};
 
-  const totalViews = userPosts.reduce((sum, post) => sum + (post.views || 0), 0);
-  const totalLikes = userPosts.reduce((sum, post) => sum + (post.likes || 0), 0);
+  const totalViews = userPosts.reduce(
+    (sum, post) => sum + (post.views || 0),
+    0,
+  );
+  const totalLikes = userPosts.reduce(
+    (sum, post) => sum + (post.likes || 0),
+    0,
+  );
 
   const renderPosts = () => {
     return (
@@ -279,88 +270,60 @@ export const ProfilePage: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
+    <div className="max-w-4xl mx-auto px-4 py-4 sm:p-6">
       {/* Profile Header */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 mb-6">
-        <div className="flex items-start space-x-6">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-8 mb-6">
+        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
           <div className="relative">
             <img
               src={profile.pfp}
               alt={profile.fullName}
-              className="w-32 h-32 rounded-full object-cover border-4 border-white shadow-lg"
+              className="w-24 h-24 sm:w-32 sm:h-32 rounded-full object-cover border-4 border-white shadow-lg"
             />
-            <div className="absolute -bottom-2 -right-2 bg-green-500 w-8 h-8 rounded-full border-4 border-white"></div>
+            <div className="absolute -bottom-1.5 -right-1.5 sm:-bottom-2 sm:-right-2 bg-green-500 w-6 h-6 sm:w-8 sm:h-8 rounded-full border-4 border-white"></div>
           </div>
-          
-          <div className="flex-1">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-1">{profile.fullName}</h1>
-                <p className="text-gray-600 text-lg">@{profile.username}</p>
+
+          <div className="flex-1 w-full min-w-0">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
+              <div className="text-center sm:text-left min-w-0">
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-1 break-words">
+                  {profile.fullName}
+                </h1>
+                <p className="text-gray-600 text-base sm:text-lg break-all">
+                  @{profile.username}
+                </p>
               </div>
-              
-              <div className="flex items-center space-x-3">
+
+              <div className="flex items-center justify-center sm:justify-end gap-2 sm:gap-3 w-full sm:w-auto">
                 {isOwnProfile ? (
-                  <button 
+                  <button
                     onClick={() => setIsEditProfileOpen(true)}
-                    className="flex items-center space-x-2 px-4 py-2 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 transition-colors"
+                    className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 bg-amber-500 text-white rounded-lg font-medium hover:bg-amber-600 transition-colors w-full sm:w-auto"
                   >
                     <Edit className="w-4 h-4" />
                     <span>Edit Profile</span>
                   </button>
                 ) : (
-                  <>
-                    {!isBlocked && (
-                      <button
-                        onClick={handleFollow}
-                        className={`px-6 py-3 rounded-xl font-medium transition-colors ${
-                          isFollowing
-                            ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
-                            : 'bg-amber-500 hover:bg-amber-600 text-white'
-                        }`}
-                      >
-                        {isFollowing ? 'Following' : 'Follow'}
-                      </button>
-                    )}
-                    
-                    {/* Three Dot Menu */}
-                    <div className="relative">
-                      <button
-                        onClick={() => setShowMenu(!showMenu)}
-                        className="p-3 hover:bg-gray-100 rounded-xl transition-colors"
-                      >
-                        <MoreHorizontal className="w-5 h-5 text-gray-600" />
-                      </button>
-
-                      {showMenu && (
-                        <div className="absolute top-full right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 min-w-48 py-1">
-                          <button
-                            onClick={handleBlock}
-                            className="w-full text-left px-4 py-2 hover:bg-red-50 transition-colors flex items-center space-x-2 text-red-600"
-                          >
-                            <UserX className="w-4 h-4" />
-                            <span>{isBlocked ? 'Unblock' : 'Block'} @{profile.username}</span>
-                          </button>
-                          <button
-                            onClick={handleReport}
-                            className="w-full text-left px-4 py-2 hover:bg-red-50 transition-colors flex items-center space-x-2 text-red-600"
-                          >
-                            <Flag className="w-4 h-4" />
-                            <span>Report @{profile.username}</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </>
+                  <button
+                    onClick={handleFollow}
+                    className={`px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-medium transition-colors whitespace-nowrap ${
+                      isFollowing
+                        ? "bg-gray-100 hover:bg-gray-200 text-gray-700"
+                        : "bg-amber-500 hover:bg-amber-600 text-white"
+                    }`}
+                  >
+                    {isFollowing ? "Following" : "Follow"}
+                  </button>
                 )}
               </div>
             </div>
-            
-            <p className="text-gray-700 mb-6 leading-relaxed">
-              {profile.bio || "Creative enthusiast sharing moments and inspirations. Always exploring new perspectives and connecting with amazing people around the world."}
+
+            <p className="text-gray-700 mb-6 leading-relaxed text-center sm:text-left">
+              {profile.bio ||
+                "Creative enthusiast sharing moments and inspirations. Always exploring new perspectives and connecting with amazing people around the world."}
             </p>
-            
-            <div className="flex items-center space-x-6 text-sm text-gray-600">
+
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 sm:gap-6 text-sm text-gray-600">
               <div className="flex items-center space-x-1">
                 <MapPin className="w-4 h-4" />
                 <span>San Francisco, CA</span>
@@ -372,64 +335,74 @@ export const ProfilePage: React.FC = () => {
             </div>
           </div>
         </div>
-        
+
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-6 mt-8 pt-8 border-t border-gray-100">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6 mt-6 sm:mt-8 pt-6 sm:pt-8 border-t border-gray-100">
           <div className="text-center">
-            <div className="text-2xl font-bold text-gray-900">{userPosts.length}</div>
+            <div className="text-xl sm:text-2xl font-bold text-gray-900">
+              {userPosts.length}
+            </div>
             <div className="text-sm text-gray-600">Posts</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-gray-900">{totalLikes}</div>
+            <div className="text-xl sm:text-2xl font-bold text-gray-900">
+              {totalLikes}
+            </div>
             <div className="text-sm text-gray-600">Likes</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-gray-900">{totalViews}</div>
+            <div className="text-xl sm:text-2xl font-bold text-gray-900">
+              {totalViews}
+            </div>
             <div className="text-sm text-gray-600">Views</div>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-gray-900">{profile.followerCount}</div>
+            <div className="text-xl sm:text-2xl font-bold text-gray-900">
+              {profile.followerCount}
+            </div>
             <div className="text-sm text-gray-600">Followers</div>
           </div>
         </div>
       </div>
-      
+
       {/* Tabs */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="flex border-b border-gray-100">
           <button
-            onClick={() => setActiveTab('posts')}
-            className={`flex-1 px-6 py-4 text-center font-medium transition-colors ${
-              activeTab === 'posts'
-                ? 'text-amber-600 border-b-2 border-amber-600 bg-amber-50/50'
-                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+            onClick={() => setActiveTab("posts")}
+            className={`flex-1 px-3 sm:px-6 py-3 sm:py-4 text-center font-medium transition-colors ${
+              activeTab === "posts"
+                ? "text-amber-600 border-b-2 border-amber-600 bg-amber-50/50"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
             }`}
           >
-            <div className="flex items-center justify-center space-x-2">
+            <div className="flex items-center justify-center gap-1.5 sm:gap-2 text-sm sm:text-base">
               <Award className="w-4 h-4" />
               <span>Posts ({userPosts.length})</span>
             </div>
           </button>
           {profile.relationshipStatus.isOwnProfile && (
             <button
-              onClick={() => setActiveTab('liked')}
-              className={`flex-1 px-6 py-4 text-center font-medium transition-colors ${
-                activeTab === 'liked'
-                  ? 'text-amber-600 border-b-2 border-amber-600 bg-amber-50/50'
-                  : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+              onClick={() => setActiveTab("liked")}
+              className={`flex-1 px-3 sm:px-6 py-3 sm:py-4 text-center font-medium transition-colors ${
+                activeTab === "liked"
+                  ? "text-amber-600 border-b-2 border-amber-600 bg-amber-50/50"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
               }`}
             >
-              <div className="flex items-center justify-center space-x-2">
+              <div className="flex items-center justify-center gap-1.5 sm:gap-2 text-sm sm:text-base">
                 <Heart className="w-4 h-4" />
                 <span>Liked Posts</span>
               </div>
             </button>
           )}
         </div>
-        
-        <div className="p-6">
-                     {activeTab === 'posts' && renderPosts()}
-                     {activeTab === 'liked' && profile.relationshipStatus.isOwnProfile && renderLiked()}
+
+        <div className="p-4 sm:p-6">
+          {activeTab === "posts" && renderPosts()}
+          {activeTab === "liked" &&
+            profile.relationshipStatus.isOwnProfile &&
+            renderLiked()}
         </div>
       </div>
 
@@ -440,7 +413,7 @@ export const ProfilePage: React.FC = () => {
           onPostUpdate={async () => {
             setEditingPost(null);
             await fetchUserPosts();
-            toast.success('Post updated successfully!');
+            toast.success("Post updated successfully!");
           }}
         />
       )}
@@ -456,10 +429,10 @@ export const ProfilePage: React.FC = () => {
 
       {profile && isOwnProfile && (
         <EditProfileModal
-            isOpen={isEditProfileOpen}
-            onClose={() => setIsEditProfileOpen(false)}
-            user={profile}
-            onProfileUpdate={handleProfileUpdate}
+          isOpen={isEditProfileOpen}
+          onClose={() => setIsEditProfileOpen(false)}
+          user={profile}
+          onProfileUpdate={handleProfileUpdate}
         />
       )}
     </div>
