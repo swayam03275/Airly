@@ -253,10 +253,60 @@ The frontend will start on `http://localhost:5173`
 - `MONGODB_URI`: Your MongoDB connection string
 - `ACCESS_TOKEN_SECRET` & `REFRESH_TOKEN_SECRET`: Generate strong random strings
 - `CLOUDINARY_*`: Get these from your Cloudinary dashboard
+- `UPSTASH_REDIS_REST_URL` & `UPSTASH_REDIS_REST_TOKEN`: Required for feed caching (recommended)
 
 #### Frontend (.env)
 
 - `VITE_SERVER_API`: Should point to your backend URL (http://localhost:8000/api/v1)
+
+## Redis Caching (Feed API)
+
+Airly uses Upstash Redis REST caching for feed endpoints to reduce repeated aggregation load on MongoDB and improve response time.
+
+### Why Redis Here
+
+- Feed endpoints are read-heavy and frequently repeated.
+- Aggregation pipelines for sorting and ranking are comparatively expensive.
+- Redis stores precomputed response payloads for short TTL windows.
+
+### Environment Variables
+
+Add these values in backend environment configuration:
+
+- UPSTASH_REDIS_REST_URL
+- UPSTASH_REDIS_REST_TOKEN
+
+### What Is Cached
+
+- GET /api/v1/feed?sort=recent
+- GET /api/v1/feed?sort=liked
+- GET /api/v1/feed?sort=popular
+
+Each cache key includes sort mode, tag, pagination pointer, and user identity segment so personalized flags remain correct.
+
+### Step-by-Step Runtime Flow
+
+1. Request reaches feed controller.
+2. Controller builds deterministic cache key from query and user context.
+3. Redis get is attempted first.
+4. If key exists, cached payload is returned immediately.
+5. If key does not exist, MongoDB aggregation pipeline executes.
+6. Response payload is stored in Redis with TTL.
+7. Response is sent to the client.
+8. On tweet create, edit, or delete, related feed cache keys are invalidated.
+
+### How Vercel Path Works
+
+1. Vercel routes /api/v1/\* to api/serverless.
+2. Serverless handler initializes Mongo connection once per warm instance.
+3. Serverless handler initializes Redis integration in non-blocking safe mode.
+4. If Redis env is missing or unavailable, app continues without cache.
+
+### Expected Impact
+
+- Significant latency reduction on repeated feed requests.
+- Lower MongoDB query pressure for hot endpoints.
+- Faster user-perceived feed loading for repeated sorts and pagination patterns.
 
 ### 5. Testing
 

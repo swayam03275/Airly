@@ -5,8 +5,8 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "install-backend": "cd Backend && npm install",
-    "install-frontend": "cd frontend && npm install",
+    "install-backend": "npm --prefix Backend install --ignore-scripts",
+    "install-frontend": "npm --prefix frontend install --ignore-scripts",
     "postinstall": "npm run install-backend && npm run install-frontend",
     "build": "cd frontend && npm run build"
   },

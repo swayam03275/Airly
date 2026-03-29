@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import app from "./app.js";
 import connectDB from "./db/index.js";
+import { initRedis } from "./utils/redis.js";
 
 dotenv.config({
   path: "./.env",
@@ -10,6 +11,10 @@ const PORT = process.env.PORT || 8000;
 
 connectDB()
   .then(() => {
+    initRedis().catch((error) => {
+      console.error("Redis init failed. Continuing without cache:", error);
+    });
+
     app.on("error", (error) => {
       console.log("ERROR", error);
       throw error;
